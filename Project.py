@@ -3,7 +3,8 @@ import numpy
 #import cmath
 #import math
 import os
-import numdifftools as nd #remove eventually
+from numpy import linalg as LA
+#import numdifftools as nd
 from numpy.linalg import inv
 
 #shortcut for block comment = ctrl + 4
@@ -34,8 +35,11 @@ MVAbase = 100
 #something else = 20 but can't read my notes
 
 
-#N = 2
-#Matrix = [[0.] * N for i in range(N)]
+N = 2
+Matrix = [[0.] * N for i in range(N)]
+print(Matrix)
+
+print(numpy.dot(Matrix, Matrix )  )
 
 
            
@@ -81,25 +85,37 @@ MVAbase = 100
 #==============================================================================
 # Function that computes Jacobian
 def jacobian(x,y):
-    return nd.Jacobian(x,y)
+    return [[1,1],[y,x]]
     
     
     
 def NewtonRaphson(f,g,x0,y0,Eps):
     delta = [[1],[1]]
-    while delta > [[Eps],[Eps]]:
+    while abs(LA.norm(delta)) > Eps:
         fx = f(x0,y0)
         gx = g(x0,y0)
-        fxgx = [[fx],[gx]]
+        print("fx",fx)
+        print("gx",gx)
+        fxgx = [fx,gx]
+        print("fxgx")
         print(fxgx)
         J = jacobian(x0,y0)
+        print("J")
+        print(J)
         Jinv = inv(J)
+        print("Jinv")
+        print(Jinv)
         delta = - numpy.dot(Jinv,fxgx)
-        x0 = x0 + delta
+        print("delta")
+        print(delta)
+        x0 = x0 + delta[0]
+        y0 =  y0 + delta[1]
+        print("x0")
+        print(x0)
     print('Root is at: ',x0)
-    print('f(x) at root is: ',f(x0))
-    print('g(x) at root is: ',g(x0))
-    return x0
+    print('f(x,y) at root is: ',f(x0,y0))
+    print('g(x,y) at root is: ',g(x0,y0))
+    return (x0,y0)
 
 
 # NR test
@@ -110,3 +126,4 @@ def ftest(x,y):
 def gtest(x,y):
     return x*y-50
 print(NewtonRaphson(ftest,gtest,x0test,y0test,Eps))
+#this test works
