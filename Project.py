@@ -1,7 +1,9 @@
 import numpy
+from math import cos
+from math import sin
+import math
+import cmath
 #import openpyxl
-#import cmath
-#import math
 import os
 from numpy import linalg as LA
 #import numdifftools as nd
@@ -42,7 +44,7 @@ print(Matrix)
 print(numpy.dot(Matrix, Matrix )  )
 
 
-           
+
 #==============================================================================
 # Functions about read/write files
 #==============================================================================
@@ -67,15 +69,25 @@ print(numpy.dot(Matrix, Matrix )  )
 #  Functions about forming power system equations
 #==============================================================================
 
-#==============================================================================
-# def Pk():
-#     for i in 1:N :
-#         Pk[k,i] = V[k]*V[i]*(G[k,i]*cos(theta[k,i])+B[k,i]*sin(theta[k,i]))
-#     return Pk
-# def Qk():
-#==============================================================================
- 
+#these are the mismatch equations
+#not sure they're right
 
+#delta P
+def dPk(V,theta,P):
+    dPki = [[0.] * N for i in range(N)]
+    for i in range(N):
+        for k in range(N):
+            dPki[k,i] = V[k]*V[i]*(G[k,i]*cos(theta[k]-theta[i])+B[k,i]*sin(theta[k]-theta[i]))-P[k]
+    dP =  [sum(i) for i in dPki]
+    return dP
+#delta Q
+def dQk(V,theta,Q):
+    dQki = [[0.] * N for i in range(N)]
+    for i in range(N):
+        for k in range(N):
+            dQki[k,i] = V[k]*V[i]*(G[k,i]*sin(theta[k]-theta[i])+B[k,i]*cos(theta[k]-theta[i]))-Q[k]
+    dQ =  [sum(i) for i in dQki]
+    return dQ
 
 
 
@@ -84,46 +96,44 @@ print(numpy.dot(Matrix, Matrix )  )
 #  Functions about Newton-Raphson
 #==============================================================================
 # Function that computes Jacobian
-def jacobian(x,y):
-    return [[1,1],[y,x]]
-    
-    
-    
-def NewtonRaphson(f,g,x0,y0,Eps):
-    delta = [[1],[1]]
+def jacobian(theta,V):
+    return [[5*V*cos(theta),5*sin(theta)],
+            [5*V*sin(theta),10*V-5*cos(theta)]]
+
+
+# Computes the solution of a 2-D system of equations using the Newton Raphson method
+# inputs: functions P and Q, initial theta0, initial V0, tolerance (epsilon)
+# outputs: solutions for theta and V
+def NewtonRaphson(P,Q,theta0,V0,Eps):
+    delta = [[1],[1]]   #initializing the delta matrix
     while abs(LA.norm(delta)) > Eps:
-        fx = f(x0,y0)
-        gx = g(x0,y0)
-        print("fx",fx)
-        print("gx",gx)
-        fxgx = [fx,gx]
-        print("fxgx")
-        print(fxgx)
-        J = jacobian(x0,y0)
+        Px = P(theta0,V0)
+        Qx = Q(theta0,V0)
+        PxQx = [Px,Qx]
+        print(PxQx)
+        J = jacobian(theta0,V0)
         print("J")
         print(J)
         Jinv = inv(J)
         print("Jinv")
         print(Jinv)
-        delta = - numpy.dot(Jinv,fxgx)
+        delta = - numpy.dot(Jinv,PxQx)
         print("delta")
         print(delta)
-        x0 = x0 + delta[0]
-        y0 =  y0 + delta[1]
-        print("x0")
-        print(x0)
-    print('Root is at: ',x0)
-    print('f(x,y) at root is: ',f(x0,y0))
-    print('g(x,y) at root is: ',g(x0,y0))
-    return (x0,y0)
+        theta0 = theta0 + delta[0]
+        V0 =  V0 + delta[1]
+    print('Root is at: ',theta0)
+    print('f(x,y) at root is: ',P(theta0,V0))
+    print('g(x,y) at root is: ',Q(theta0,V0))
+    return (theta0,V0)
 
 
 # NR test
-x0test = 4
-y0test = 9
-def ftest(x,y):
-    return x+y-15
-def gtest(x,y):
-    return x*y-50
-print(NewtonRaphson(ftest,gtest,x0test,y0test,Eps))
+theta0test = 0
+V0test = 1
+def Ptest(theta,V):
+    return 5*V*sin(theta)-1.689
+def Qtest(theta,V):
+    return 5*V**2-5*V*cos(theta)-1.843
+print(NewtonRaphson(Ptest,Qtest,theta0test,V0test,Eps))
 #this test works
