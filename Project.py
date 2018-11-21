@@ -46,12 +46,29 @@ Matrix = [[0.] * N for i in range(N)]
 # Functions about read/write files
 #==============================================================================
 
-
-
-
-
-
-
+def read_in():
+    infile = open(lineCSV, 'r') 
+    
+    headers = [] # Extracts the column headers from the .csv file
+    node_from,node_to = [],[] 
+    R_values, X_values, B_values,Fmax_values = [],[],[],[]
+    
+    flag = False
+    for line in infile:
+        entries = line.split(',')
+        if flag:
+            node_from.append(int(entries[0]))
+            node_to.append(int(entries[1]))
+            R_values.append(float(entries[2]))
+            X_values.append(float(entries[3]))
+            B_values.append(float(entries[4]))
+            Fmax_values.append(entries[5])
+        else:
+            headers = entries
+        flag = True
+    infile.close()
+    
+    return([headers, node_from, node_to, R_values, X_values, B_values, Fmax_values,])
 
 #==============================================================================
 #  Functions about creating Y matrix
