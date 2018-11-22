@@ -46,29 +46,63 @@ Matrix = [[0.] * N for i in range(N)]
 # Functions about read/write files
 #==============================================================================
 
-def read_in():
+def lineRead():
     infile = open(lineCSV, 'r') 
     
     headers = [] # Extracts the column headers from the .csv file
     node_from,node_to = [],[] 
     R_values, X_values, B_values,Fmax_values = [],[],[],[]
     
-    flag = False
+    # Extracts the column headers from the LineData1.csv file before iterating 
+    # through and organizing the data into the appropriate list
+    grab_headers = False
     for line in infile:
         entries = line.split(',')
-        if flag:
+        if grab_headers:
             node_from.append(int(entries[0]))
             node_to.append(int(entries[1]))
             R_values.append(float(entries[2]))
             X_values.append(float(entries[3]))
             B_values.append(float(entries[4]))
-            Fmax_values.append(entries[5])
+            Fmax_values.append(entries[5].rstrip())
         else:
             headers = entries
-        flag = True
+            grab_headers = True
     infile.close()
     
     return([headers, node_from, node_to, R_values, X_values, B_values, Fmax_values,])
+
+
+
+def busRead():
+    infile = open('BusData1.csv', 'r')
+    
+    headers,Bus_num, P_MW, Q_MVAR, Type, P_gen, V_set = [],[],[],[],[],[],[]
+    
+    # Extracts the column headers from the BusData1.csv file before iterating 
+    # through and organizing the data into the appropriate list
+    grab_headers = False
+    for line in infile:
+        entries = line.split(',')
+        if grab_headers:
+            Bus_num.append(int(entries[0]))
+            P_MW.append(entries[1])
+            Q_MVAR.append(entries[2])
+            Type.append(entries[3])
+            P_gen.append(entries[4])
+            V_set.append(entries[5].rstrip())
+        else:
+            headers = entries
+            grab_headers = True
+    infile.close()    
+    
+    #values = [headers, Bus_num, P_MW, Q_MVAR, Type, P_gen, V_set]
+    
+    busDict = {}
+    for bus in Bus_num:
+        busDict[bus] = [P_MW.pop(0), Q_MVAR.pop(0), Type.pop(0), P_gen.pop(0), V_set.pop(0)]
+    
+    return busDict
 
 #==============================================================================
 #  Functions about creating Y matrix
