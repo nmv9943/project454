@@ -70,14 +70,13 @@ def lineRead():
             headers = entries
             grab_headers = True
     infile.close()
-    return([headers, node_from, node_to, R_values, X_values, B_values, Fmax_values,])
-
+    return(headers, node_from, node_to, R_values, X_values, B_values, Fmax_values)
 
 
 def busRead():
     infile = open(busCSV, 'r')
     
-    headers,Bus_num, P_MW, Q_MVAR, Type, P_gen, V_set = [],[],[],[],[],[],[]
+    headers,Bus_num, P, Q, Type, Gen, V = [],[],[],[],[],[],[]
     
     # Extracts the column headers from the BusData1.csv file before iterating 
     # through and organizing the data into the appropriate list
@@ -86,11 +85,11 @@ def busRead():
         entries = line.split(',')
         if grab_headers:
             Bus_num.append(int(entries[0]))
-            P_MW.append(entries[1])
-            Q_MVAR.append(entries[2])
+            P.append(entries[1])
+            Q.append(entries[2])
             Type.append(entries[3])
-            P_gen.append(entries[4])
-            V_set.append(entries[5].rstrip())
+            Gen.append(entries[4])
+            V.append(entries[5].rstrip())
         else:
             headers = entries
             grab_headers = True
@@ -98,21 +97,59 @@ def busRead():
     
     #values = [headers, Bus_num, P_MW, Q_MVAR, Type, P_gen, V_set]
     
-    busDict = {}
+    P_MW = {}
+    Q_MVAR = {}
+    bus_type = {}
+    P_gen = {}
+    V_set = {}
     for bus in Bus_num:
-        busDict[bus] = [P_MW.pop(0), Q_MVAR.pop(0), Type.pop(0), P_gen.pop(0), V_set.pop(0)]
+        P_MW[bus] = [P.pop(0)]
+        Q_MVAR[bus] = [Q.pop(0)] 
+        bus_type[bus] = [Type.pop(0)] 
+        P_gen[bus] = [Gen.pop(0)] 
+        V_set[bus] = [V.pop(0)]
     
-    return busDict
+    return(P_MW, Q_MVAR, bus_type, P_gen, V_set)
 
 
 #==============================================================================
-#  Functions about creating Y matrix
+#  Functions about creating Y matrix. Use in conjunction with lineRead()
 #==============================================================================
 
+def admittance_matrix(headers, node_from, node_to, R_values, X_values, B_values, Fmax_values):
+    
+    # Gets the total number of buses
+    bus_amount = max(node_to)
+    
+    # Forms a matrix with a number of rows equal to the amount of buses
+    Y_matrix = [[] for i in range (0,bus_amount)]   
+    
+    # Presets each row with a number of zeros equal to the amount of buses 
+    for row in Y_matrix:
+        for i in range(0,bus_amount):
+            row.append(0)
+    
+    # Iterates through the list of line parameters to form the admittance matrix Y
+    for start_node in node_from:
+        end_node = node_to.pop(0)
+        line_R = R_values.pop(0)
+        line_X = X_values.pop(0)
+        shunt = B_values.pop(0)/2
+        
+        # Adds line admittances to the appropriate element in the list
+        Y_matrix[start_node-1][end_node-1] = -1/complex(line_R,line_X)
+        Y_matrix[end_node-1][start_node-1] = -1/complex(line_R,line_X)
+        
+        # Forms the diagonal entries (self-admittances) by summing all of 
+        # admittances that terminate on the present node 
+        Y_matrix[start_node-1][start_node-1] += 1/complex(line_R,line_X)
+        Y_matrix[end_node-1][end_node-1] += 1/complex(line_R,line_X)
+        
+        # Adds shunt admittances to the diagonal entries 
+        Y_matrix[start_node-1][start_node-1] += complex(0,shunt)
+        Y_matrix[end_node-1][end_node-1] += complex(0,shunt)
 
-
-
-
+    return(Y_matrix)
 
 #==============================================================================
 #  Functions about forming power system equations
