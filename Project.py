@@ -62,7 +62,7 @@ def lineRead():
     
     headers = [] # Extracts the column headers from the .csv file
     node_from,node_to = [],[] 
-    R_values, X_values, B_values,Fmax_values = [],[],[],[]
+    R_values, X_values, B_values,Fmax_values, Z_values = [],[],[],[],[]
     
     # Extracts the column headers from the LineData1.csv file before iterating 
     # through and organizing the data into the appropriate list
@@ -75,30 +75,56 @@ def lineRead():
             R_values.append(float(entries[2]))
             X_values.append(float(entries[3]))
             B_values.append(float(entries[4]))
-            Fmax_values.append(entries[5].rstrip())
+            Fmax_values.append(float(entries[5].rstrip()))
+            Z_values.append(complex(float(entries[2]),float(entries[3])))
         else:
             headers = entries
             grab_headers = True
     infile.close()
-    return(headers, node_from, node_to, R_values, X_values, B_values, Fmax_values)
+    
+    return(node_from, node_to, R_values, X_values, B_values, Fmax_values, Z_values)
 
 def busRead():
     infile = open(busCSV, 'r')
     
-    headers,Bus_num, P, Q, Type, Gen, V = [],[],[],[],[],[],[]
+    headers = []
+    Bus_num, P, Q, Type, Gen, V = [],[],[],[],[],[]
     
-    # Extracts the column headers from the BusData1.csv file before iterating 
-    # through and organizing the data into the appropriate list
+    # Extracts the column headers from the .csv file before iterating through
+    # and organizing the data into the appropriate list
     grab_headers = False
     for line in infile:
         entries = line.split(',')
         if grab_headers:
             Bus_num.append(int(entries[0]))
-            P.append(entries[1])
-            Q.append(entries[2])
+            
+            # Set swing bus real power to 0.
+            if entries[1] == '':
+                P.append(0)
+            else:
+                P.append(float(entries[1]))
+            
+            # Set swing bus reactive power to 0.
+            if entries[2] == '':
+                Q.append(0)
+            else:    
+                Q.append(float(entries[2]))
+                
             Type.append(entries[3])
-            Gen.append(entries[4])
-            V.append(entries[5].rstrip())
+            
+            # Set all PQ bus real power generation to 0. 
+            if entries[3] == 'G':
+                Gen.append(None)
+            elif entries[4] == '':
+                Gen.append(0)
+            else:
+                Gen.append(float(entries[4]))
+            
+            # Preset all empty V set points to 1    
+            if entries[5].rstrip() == '':
+                V.append(1)
+            else:
+                V.append(entries[5].rstrip())
         else:
             headers = entries
             grab_headers = True
@@ -120,7 +146,6 @@ def busRead():
     
     return(P_MW, Q_MVAR, bus_type, P_gen, V_set)
 
-
 #Alex can you write these
 def lineWrite():
     return
@@ -133,7 +158,7 @@ def busWrite():
 #  Functions about creating Y matrix. Use in conjunction with lineRead()
 #==============================================================================
 
-def admittance_matrix(node_from, node_to, R_values, X_values, B_values):
+def admittance_matrix(node_from, node_to, R_values, X_values, B_values, Fmax_values, Z_values):
     
     # Gets the total number of buses
     bus_amount = max(node_to)
@@ -152,15 +177,16 @@ def admittance_matrix(node_from, node_to, R_values, X_values, B_values):
         line_R = R_values.pop(0)
         line_X = X_values.pop(0)
         shunt = B_values.pop(0)/2
+        line_Z = complex(line_R, line_X)
         
         # Adds line admittances to the appropriate element in the list
-        Y_matrix[start_node-1][end_node-1] = -1/complex(line_R,line_X)
-        Y_matrix[end_node-1][start_node-1] = -1/complex(line_R,line_X)
+        Y_matrix[start_node-1][end_node-1] = -1/line_Z
+        Y_matrix[end_node-1][start_node-1] = -1/line_Z
         
         # Forms the diagonal entries (self-admittances) by summing all of 
         # admittances that terminate on the present node 
-        Y_matrix[start_node-1][start_node-1] += 1/complex(line_R,line_X)
-        Y_matrix[end_node-1][end_node-1] += 1/complex(line_R,line_X)
+        Y_matrix[start_node-1][start_node-1] += 1/line_Z
+        Y_matrix[end_node-1][end_node-1] += 1/line_Z
         
         # Adds shunt admittances to the diagonal entries 
         Y_matrix[start_node-1][start_node-1] += complex(0,shunt)
@@ -331,11 +357,12 @@ buses = busRead()
 N = len(buses[1])
 print(N)
 lines=lineRead()
-Nl = len(lines[1])
-node_from = lines[1]
-node_to = lines[2]
-line_R = lines[3]
-line_X = lines[4]
+Nl = len(lines[0])
+node_from = lines[0]
+node_to = lines[1]
+line_R = lines[2]
+line_X = lines[3]
+print(Nl)
 print(line_R)
 print(line_X)
 
@@ -385,13 +412,13 @@ def LineFlowTable(V, node_from, node_to, R, X):
         LineFlows[line][5] =  S.imag #Q value
     return LineFlows
 
-node_from = lines[1]
-node_to = lines[2]
-R = lines[3]
-X = lines[4]
+node_from = lines[0]
+node_to = lines[1]
+R = lines[2]
+X = lines[3]
 LineFlowTable = LineFlowTable(Vtest,node_from, node_to, R, X)
 print(LineFlowTable)
-#(headers, node_from, node_to, R_values, X_values, B_values, Fmax_values)
+#(node_from, node_to, R_values, X_values, B_values, Fmax_values, Z_values)
 
 #def BusPInj():
 #    for k in range(N):
@@ -412,20 +439,22 @@ def solve_all():
     N = len(buses[1]) #number of buses
     Nl = len(lines[1]) #number of lines
     #create new objects for lines
-    node_from = lines[1]
-    node_to = lines[2]
-    line_R = lines[3]
-    line_X = lines[4]
-    line_B = lines[5]
+    node_from = lines[0]
+    node_to = lines[1]
+    line_R = lines[2]
+    line_X = lines[3]
+    line_B = lines[4]
+    line_Fmax = lines[5]
+    line_Z = lines[6]
     #create new objects for buses
     P = buses[0]
-    Q_MVAR = buses[1]
+    Q = buses[1]
     bus_type = buses[2]
     P_gen = buses[3]
     V_set = buses[4]
 
 
-    Ybus = admittance_matrix(node_from,node_to,line_R,line_X,line_B)
+    Ybus = admittance_matrix(node_from,node_to,line_R,line_X,line_B,line_Fmax,line_Z)
     NR = NewtonRaphson(Ybus, P, Q, theta0, V0, Eps)
     V = NR[1]
     LineFlowTable = LineFlowTable(V,node_from,node_to,line_R,line_X)
