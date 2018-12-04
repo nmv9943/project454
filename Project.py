@@ -283,7 +283,7 @@ def NewtonRaphson(Ybus,P,Q,theta0,V0,Eps):
     dQ = numpy.subtract(Qcomp, numpy.array(Q))
     dQ = dQ[numpy.array(range(1, N - m + 1))]  # only save m+1 to N eventually
     dPQ = numpy.concatenate((dP, dQ))
-    while abs(LA.norm(dPQ)) > Eps:
+    while max(abs(dPQ)) > Eps:
         J = jacobian(G,B,Pcomp,Qcomp,V0,theta0) #should this be dP & dQ or Pcomp and Qcomp?
         Jinv = inv(J)
         delta = - numpy.dot(Jinv,dPQ)
@@ -398,6 +398,12 @@ print(LineFlowTable)
 #        for i in range(N):
 #            Sinj
 
+V=[1.0,1.05,1.1,1.15,1.2,1.25,7,8,9,10]
+print(V[0])
+GD = [2,3,1,4]
+for i in GD:
+    print(i)
+    print(V[(i-1)])
 
 def solve_all():
     #read in data files
