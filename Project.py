@@ -33,16 +33,16 @@ busCSV = database + "BusData" + scenarioName + ".csv"
 #==============================================================================
 
 
-Eps = 0.00001
-MVAbase = 100
+MVAbase = 100.
+Eps = .1/MVAbase
 #something else = 20 but can't read my notes
 
 
 #N = 2
 #Matrix = [[0.] * N for i in range(N)]
-N = 5 #number of buses
+#N = 5 #number of buses
 #m = #number of PV buses
-Nl = 4 #number of lines
+#Nl = 4 #number of lines
 
 #==============================================================================
 # Misc functions
@@ -102,19 +102,19 @@ def busRead():
             if entries[1] == '':
                 P.append(0)
             else:
-                P.append(float(entries[1]))
+                P.append(float(entries[1])) #change to pu
             
             # Set swing bus reactive power to 0.
             if entries[2] == '':
                 Q.append(0)
             else:    
-                Q.append(float(entries[2]))
+                Q.append(float(entries[2])) #change to pu
                 
             Type.append(entries[3])
             
             # Set all PQ bus real power generation to 0. 
             if entries[3] == 'G':
-                Gen.append(None)
+                Gen.append(0)
             elif entries[4] == '':
                 Gen.append(0)
             else:
@@ -122,29 +122,35 @@ def busRead():
             
             # Preset all empty V set points to 1    
             if entries[5].rstrip() == '':
-                V.append(1)
+                V.append(float(1))
             else:
-                V.append(entries[5].rstrip())
+                V.append(float(entries[5].rstrip()))
         else:
             headers = entries
             grab_headers = True
     infile.close()    
     
     #values = [headers, Bus_num, P_MW, Q_MVAR, Type, P_gen, V_set]
+
+    P_MW = P
+    Q_MVAR = Q
+    bus_type = Type
+    P_gen = Gen
+    V_set = V
+
+    #P_MW = {}
+    #Q_MVAR = {}
+    #bus_type = {}
+    #P_gen = {}
+    #V_set = {}
+    #for bus in Bus_num:
+    #    P_MW[bus] = [P.pop(0)]
+    #    Q_MVAR[bus] = [Q.pop(0)]
+    #    bus_type[bus] = [Type.pop(0)]
+    #    P_gen[bus] = [Gen.pop(0)]
+    #    V_set[bus] = [V.pop(0)]
     
-    P_MW = {}
-    Q_MVAR = {}
-    bus_type = {}
-    P_gen = {}
-    V_set = {}
-    for bus in Bus_num:
-        P_MW[bus] = [P.pop(0)]
-        Q_MVAR[bus] = [Q.pop(0)] 
-        bus_type[bus] = [Type.pop(0)] 
-        P_gen[bus] = [Gen.pop(0)] 
-        V_set[bus] = [V.pop(0)]
-    
-    return(P_MW, Q_MVAR, bus_type, P_gen, V_set)
+    return(Bus_num,P_MW, Q_MVAR, bus_type, P_gen, V_set)
 
 #Alex can you write these
 def lineWrite():
@@ -197,7 +203,7 @@ def admittance_matrix(node_from, node_to, R_values, X_values, B_values, Fmax_val
 #==============================================================================
 #  Functions about forming power system equations
 #==============================================================================
-def Pcomputed(G,B, V, theta):
+def Pcomputed(G,B, V, theta,N):
     Pcomp = [0.] * (N)
     print(Pcomp)
     for k in range(N):
@@ -208,7 +214,7 @@ def Pcomputed(G,B, V, theta):
         Pcomp[k] = tmp
     return numpy.array(Pcomp)
 
-def Qcomputed(G,B,V,theta):
+def Qcomputed(G,B,V,theta,N):
     Qcomp = [0.] * (N)
     print(Qcomp)
     for k in range(N):
@@ -229,7 +235,7 @@ def J11_diff(Vk,Vj,Gkj,Bkj,thetakj):
     return Vk*Vj*(Gkj*sin(thetakj)-Bkj*cos(thetakj))
 
 def J12_same(Vk,Pk,Qk,Gkk,Bkk):
-    return Pk/Vk-Vk*Gkk
+    return Pk/Vk+Vk*Gkk
 def J12_diff(Vk,Vj,Gkj,Bkj,thetakj):
     return Vk*(Gkj*cos(thetakj)+Bkj*sin(thetakj))
 
@@ -245,31 +251,44 @@ def J22_diff(Vk,Vj,Gkj,Bkj,thetakj):
 
 #function that computes each jacobian part (aka J11, J21, J12, J22)
 def Jpartsolve(G,B,P,Q,V,theta,J_same,J_diff,rangej,rangek):
-    Jpart = [[0.] * (len(rangej)) for i in rangek]
+    Jpart = [[0.] * (len(rangej)) for i in range(len(rangek))]
+
+    print(len(rangej))
+    print(len(rangek))
+    print(rangej)
+    print(rangek)
     for j in rangej:
-        j1 = j+1
+        #j1 = j+1
+        j1 = j
         Vj = V[j]
+        matrix_j = rangej.index(j)
+
         for k in rangek:
-            k1 = k+1
+            print(k)
+            #k1 = k+1
+            k1 = k
+            matrix_k = rangek.index(k)
             Vk = V[k1]
             Bkj = B[k1][j1]
             Gkj = G[k1][j1]
             if j==k:
-                Jpart[k][k]=J_same(Vk,P[k1],Q[k1],Gkj,Bkj)
+                Jpart[matrix_k][matrix_j]=J_same(Vk,P[k1],Q[k1],Gkj,Bkj)
             else:
                 Vj = V[j1]
                 thetakj = theta[k1] - theta[j1]
-                Jpart[k][j]=J_diff(Vk,Vj,Gkj,Bkj,thetakj)
+                Jpart[matrix_k][matrix_j] = J_diff(Vk, Vj, Gkj, Bkj,thetakj)
+                #print(Jpart[k-1][j-1])
     return numpy.array(Jpart)
 
 #This function computes the Jacobian of a power system
-def jacobian(G,B,P,Q,V,theta):
-    rangeP = range(N - 1)
-    rangePQ = range(N - m)
-    J11 = Jpartsolve(G,B,P,Q,V,theta,J11_same,J11_diff,rangeP,rangeP)
-    J21 = Jpartsolve(G,B,P,Q,V,theta,J21_same,J21_diff,rangeP,rangePQ)
-    J12 = Jpartsolve(G,B,P,Q,V,theta,J12_same,J12_diff,rangePQ,rangeP)
-    J22 = Jpartsolve(G,B,P,Q,V,theta,J22_same,J22_diff,rangePQ,rangePQ)
+def jacobian(G,B,P,Q,V,theta,PQPVbuses,PQbuses):
+    #rangeP = range(N - 1)
+    #rangePQ = range(N - m)
+    J11 = Jpartsolve(G,B,P,Q,V,theta,J11_same,J11_diff,PQPVbuses,PQPVbuses)
+    J21 = Jpartsolve(G,B,P,Q,V,theta,J21_same,J21_diff,PQPVbuses,PQbuses)
+    #J21 = Jpartsolve(G, B, P, Q, V, theta, J21_same, J21_diff, PQbuses, PQPVbuses)
+    J12 = Jpartsolve(G,B,P,Q,V,theta,J12_same,J12_diff,PQbuses,PQPVbuses)
+    J22 = Jpartsolve(G,B,P,Q,V,theta,J22_same,J22_diff,PQbuses,PQbuses)
     J = numpy.concatenate((numpy.concatenate((J11,J12),axis=1),
                            numpy.concatenate((J21,J22),axis=1)))
     return J
@@ -278,69 +297,110 @@ def jacobian(G,B,P,Q,V,theta):
 #==============================================================================
 #  Functions about Newton-Raphson
 #==============================================================================
-
 #test data
 N = 5 #number buses
 m = 2 #number of PQ buses
-Pt=[0,-0.96,-0.35,-0.16,0.24]
-Qt=[0,-0.62,-0.14,-0.08,-0.35]
+Pt=[0.,-0.96,-0.35,-0.16,0.24]
+Qt=[0.,-0.62,-0.14,-0.08,-0.35]
 Vt=[1.05,1,1,1,1.02]
-thetat=[0,0,0,0,0]
+thetat=[0.,0.,0.,0.,0.]
+bus_types = ["G","D","D","D","GD"]
 Ybus = [[2.6923-13.4115j,-1.9231+9.6154j,0,0,-0.7692+3.8462j],
         [-1.9231+9.6154j,3.6538-18.1942j,-0.9615+4.8077j,0,-0.7692+3.8462j],
         [0, -0.9615+4.8077j, 2.2115-11.0027j, -0.7692+3.8462j,-0.4808+2.4038j],
         [0,0,-0.7692+3.8462j, 1.1538-5.6742j, -0.3846+1.9231j],
         [-0.7692 + 3.8462j, -0.7692 +3.8462j, -0.4808 + 2.4038j, -0.3846 + 1.9231j,2.4038 -11.8942j]]
-Gt = [list(numpy.array(x).real) for x in Ybus]
-Bt = [list(numpy.array(x).imag) for x in Ybus]
+
+#supporting function
+def MaxMismatch(dP,dQ,PQbuses,PQPVbuses):
+    #print largest P mismatch and the bus
+    absdP = [abs(item) for item in dP]
+    maxPmismatch = max(absdP)
+    print("Largest P mismatch: "+str(maxPmismatch))
+    i =absdP.index(maxPmismatch)
+    print("At bus: "+str(PQPVbuses[i]))
+    #print largest Q mimatch and the bus
+    absdQ = [abs(item) for item in dQ]
+    maxQmismatch = max(absdQ)
+    print("Largest Q mismatch: "+str(maxQmismatch))
+    i =absdQ.index(maxQmismatch)
+    print("At bus: "+str(PQbuses[i]))
+    return
 
 # Computes the solution of a system of equations using the Newton Raphson method
 # inputs: initial P and Q, initial theta0, initial V0, tolerance (epsilon)
 # outputs: solutions for theta and V
-
-def NewtonRaphson(Ybus,P,Q,theta0,V0,Eps):
+def NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps,N):
     G = [list(numpy.array(x).real) for x in Ybus]
     B = [list(numpy.array(x).imag) for x in Ybus]
-    delta =[[1.] * (N-m-1)] #initializing the delta matrix
-    Pcomp = Pcomputed(G, B, V0, theta0)
-    Qcomp = Qcomputed(G, B, V0, theta0)
-    dP = numpy.subtract(Pcomp, numpy.array(P))
-    dP = dP[numpy.array(range(1, N))]  # remove the first one
-    dQ = numpy.subtract(Qcomp, numpy.array(Q))
-    dQ = dQ[numpy.array(range(1, N - m + 1))]  # only save m+1 to N eventually
-    dPQ = numpy.concatenate((dP, dQ))
-    while max(abs(dPQ)) > Eps:
-        J = jacobian(G,B,Pcomp,Qcomp,V0,theta0) #should this be dP & dQ or Pcomp and Qcomp?
-        Jinv = inv(J)
-        delta = - numpy.dot(Jinv,dPQ)
-        dtheta = delta[numpy.array(range(N-1))]
-        dtheta = numpy.insert(dtheta, 0, 0.)
-        theta0 = theta0 + dtheta
-        dV = delta[numpy.array(range(N-1,2*N-m-1))] #this bad code
-        dV = numpy.insert(dV, 0, 0.)
-        dV = numpy.insert(dV, range(N-m+1,N), 0.) #eventually change to other way
-        V0 =  V0 + dV
-        Pcomp = Pcomputed(G, B, V0, theta0)
-        Qcomp = Qcomputed(G, B, V0, theta0)
+    #which are PQ buses and PV buses?
+    PQbuses = [i for i in range(len(bus_types)) if bus_types[i] == "D"] #PQ bus if only load
+    PVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")] #PV bus if all but swing
+    del PVbuses[0] #removing swing bus
+    PQPVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "D" or bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")]
+    del PQPVbuses[0]
+    print(len(PQPVbuses))
+    print(len(PVbuses))
+    m = len(PVbuses)+1
+    print(range(N-m-1))
+    dPQ =numpy.array([1. for i in range(N-m-1)]) #initializing the dPQ matrix
+    theta0 = numpy.array(theta0)
+    V0 = numpy.array(V0)
+    iteration = 1
+
+
+    while abs(max(dPQ.min(),dPQ.max(), key=abs)) > Eps:
+        print("Iteration: " + str(iteration))
+        Pcomp = Pcomputed(G, B, V0, theta0,N)
+        Qcomp = Qcomputed(G, B, V0, theta0,N)
         print("Pcomp")
         print(Pcomp)
         print("Qcomp")
         print(Qcomp)
-        dP = numpy.subtract(Pcomp,numpy.array(P))
-        dP = dP[numpy.array(range(1,N))] #remove the first one
-        print("dP")
+        #mismatches
+        dP = numpy.subtract(Pcomp,numpy.array(Pknown))
+        dP = dP[PQPVbuses]
         print(dP)
-        dQ = numpy.subtract(Qcomp,numpy.array(Q))
-        dQ = dQ[numpy.array(range(1,N-m+1))] #only save m+1 to N eventually
+
+        dQ = numpy.subtract(Qcomp,numpy.array(Qknown))
+        #dQ = dQ[numpy.array(range(1,N-m+1))] #only save m+1 to N eventually
+        dQ = dQ[PQbuses]
         print("dQ")
         print(dQ)
-        dPQ = numpy.concatenate((dP, dQ))
-    theta0 = rad2deg(theta0) #converting to degrees instead of radians
+        #printing max mismatch value (absolute value)
+        MaxMismatch(dP, dQ, PQbuses, PQPVbuses)
+
+        dPQ = numpy.concatenate((dP, dQ))#mismatch vector
+
+        #solve jacobian
+        J = jacobian(G,B,Pcomp,Qcomp,V0,theta0,PQPVbuses,PQbuses) #should this be dP & dQ or Pcomp and Qcomp?
+        Jinv = inv(J)
+        delta = - numpy.dot(Jinv,dPQ) #correction vector
+        print(numpy.array(range(N-1)))
+        #dtheta = delta[numpy.array(range(N-1))]
+        dtheta = delta[numpy.array(range(N - 1))]
+        #dtheta = numpy.insert(dtheta, 0, 0.)
+        print(theta0[PQPVbuses])
+        theta0[PQPVbuses] = theta0[PQPVbuses] + dtheta
+
+        print(theta0[PQPVbuses] + dtheta)
+        print(theta0[PQPVbuses])
+        print(theta0)
+
+        dV = delta[numpy.array(range(N-1,2*N-m-1))]
+        #dV = numpy.insert(dV, 0, 0.)
+        #dV = numpy.insert(dV, range(N-m+1,N), 0.) #eventually change to other way
+        V0[PQbuses] =  V0[PQbuses] + dV
+        print(V0)
+        print(theta0)
+        Eps_found = max(abs(dPQ)) #find maximum mismatch and iterate
+        iteration = iteration + 1
+    #theta0 = rad2deg(theta0) #converting to degrees instead of radians
     return (theta0,V0,Pcomp,Qcomp)
 
 
-
-NRsol = NewtonRaphson(Ybus,Pt,Qt,thetat,Vt,Eps)
+#NewtonRaphson(bus_types,Ybus,Pt,Qt,thetat,Vt,Eps)
+"""
 theta_sol = NRsol[0]
 V_sol = NRsol[1]
 P_sol_pu = NRsol[2]
@@ -350,54 +410,71 @@ P_sol_MVA = P_sol_pu * MVAbase
 Q_sol_MVA = Q_sol_pu * MVAbase
 print(P_sol_MVA)
 print(Q_sol_MVA)
+"""
 
 
 
-buses = busRead()
-N = len(buses[1])
-print(N)
-lines=lineRead()
-Nl = len(lines[0])
-node_from = lines[0]
-node_to = lines[1]
-line_R = lines[2]
-line_X = lines[3]
-print(Nl)
-print(line_R)
-print(line_X)
+
+#buses = busRead()
+#N = len(buses[1])
+#print(N)
+#lines=lineRead()
+#Nl = len(lines[0])
+#node_from = lines[0]
+#node_to = lines[1]
+#line_R = lines[2]
+#line_X = lines[3]
+#print(Nl)
+#print(line_R)
+#print(line_X)
 
 #==============================================================================
 #  Functions about solving the power flow on lines
 #==============================================================================
 
 
-def lineIflow(V,node_from,node_to,R,X):
-    Iline = [[0.] * N for x in range(N)]
+def calclineflow(V,theta, node_from,node_to,Z,Fmax,Nl):
+    Pline = [0. for i in range(Nl)]
+    Qline = [0. for i in range(Nl)]
+    Sline = [0. for i in range(Nl)]
+    Smagline = [0. for i in range(Nl)]
+    violation = ["No" for i in range(Nl)]
+    print(node_to)
     for line in range(Nl):
+        print(line)
         nfrom = node_from[line]
+        print(nfrom)
         nto = node_to[line]
-        Z = complex(R[line],X[line])
-        Iline[nfrom-1][nto-1]= (V[nto-1]-V[nfrom-1])/Z
-        Iline[nto-1][nfrom-1]= -Iline[nfrom-1][nto-1]
-    return Iline
+        Vdrop = V[nfrom-1]-V[nto-1]
+        I = Vdrop*Z[line]
+        Sline[line] = Vdrop*I.conjugate()
+        Pline[line] = Sline[line].real
+        Qline[line] = Sline[line].imag
+        Smagline[line] = abs(Sline[line])
+        if Smagline[line] > Fmax[line]:
+            print(line)
+            violation[line] = "Yes"
+    return (Pline,Qline,Sline)
+
+
 
 Vtest = [1.05,1.045,1.01,1.0,.95,.9,1.05,1.1,1.0,1.05,1.0,1.05]
-
-def lineSflow(Iline,V):
-    Sline = [[0.] * N for x in range(N)]
-    for k in range(N):
-        for i in range(N):
-            if k!=i:
-                Sline[k][i] = V[k]*(Iline[k][i]).conjugate()
-    return Sline
+theta_test = [0,.1,0,0,-.1,.05,.4,0,.6,.3,-.1,.2]
+Fmax = [200,400,float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf')]
 
 
-def LineFlowTable(V, node_from, node_to, R, X):
-    lineI = lineIflow(V, node_from, node_to, R, X)
-    lineS = lineSflow(lineI,V)
+def LineFlowTable(V, theta, node_from, node_to, Z,Fmax):
+    print(Nl)
+    print(Fmax)
+    LineFlows = calclineflow(V,theta, node_from,node_to,Z,Fmax)
+    Pline = LineFlows[0]
+    Qline = LineFlows[1]
+    Sline = LineFlows[2]
     LineFlows = [[0.] * 10 for x in range(Nl)]
     for line in range(Nl):
+        print(line)
         nfrom = node_from[line]
+        print(nfrom)
         nto = node_to[line]
         LineFlows[line][0]= nfrom
         LineFlows[line][1]= nto
@@ -411,12 +488,16 @@ def LineFlowTable(V, node_from, node_to, R, X):
         LineFlows[line][4] =  S.real #P value
         LineFlows[line][5] =  S.imag #Q value
     return LineFlows
-
+"""
 node_from = lines[0]
 node_to = lines[1]
 R = lines[2]
 X = lines[3]
-LineFlowTable = LineFlowTable(Vtest,node_from, node_to, R, X)
+Z=lines[6]
+Fmax = lines[5]
+"""
+#NRsol = NewtonRaphson(bus_types,Ybus,Pt,Qt,thetat,Vt,Eps)
+#LineFlowTable = LineFlowTable(Vtest,theta_test,node_from, node_to, Z,Fmax)
 print(LineFlowTable)
 #(node_from, node_to, R_values, X_values, B_values, Fmax_values, Z_values)
 
@@ -441,26 +522,45 @@ def solve_all():
     #create new objects for lines
     node_from = lines[0]
     node_to = lines[1]
+    print(node_to)
     line_R = lines[2]
     line_X = lines[3]
     line_B = lines[4]
     line_Fmax = lines[5]
     line_Z = lines[6]
     #create new objects for buses
-    P = buses[0]
-    Q = buses[1]
-    bus_type = buses[2]
-    P_gen = buses[3]
-    V_set = buses[4]
+    #Bus_num,P_MW, Q_MVAR, bus_type, P_gen, V_set
+    Bus_num = buses[0]
+    P_MW = buses[1]
+    Q_MVAR = buses[2]
+    bus_type = buses[3]
+    P_MW_gen = buses[4]
+    V_set = buses[5]
+    theta = [0. for i in range(N)]#initialize theta
 
-
-    Ybus = admittance_matrix(node_from,node_to,line_R,line_X,line_B,line_Fmax,line_Z)
-    NR = NewtonRaphson(Ybus, P, Q, theta0, V0, Eps)
+    P_gen_pu = [x / MVAbase for x in P_MW_gen]
+    P_load_pu = [x / MVAbase for x in P_MW]
+    Q_load_pu = [x / MVAbase for x in Q_MVAR]
+    Q_gen_pu = [0. for i in range(N)] #initialize Q generation matrix
+    Ybus = admittance_matrix(node_from.copy(), node_to.copy(), line_R.copy(), line_X.copy(), line_B.copy(), line_Fmax.copy(), line_Z.copy())
+    P_inj = numpy.subtract(P_gen_pu,P_load_pu)
+    Q_inj = numpy.subtract(Q_gen_pu,Q_load_pu)
+    print(node_to)
+    print(P_inj)
+    print(Q_inj)
+    #NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps):
+    print(node_to)
+    NR = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
+    # LineFlowTable = LineFlowTable(Vtest,theta_test,node_from, node_to, Z,Fmax)
+    theta = NR[0]
     V = NR[1]
-    LineFlowTable = LineFlowTable(V,node_from,node_to,line_R,line_X)
+    print(node_to)
+    LineFlow= calclineflow(V,theta, node_from,node_to,line_Z,line_Fmax,Nl)
+    LineFlowTable = LineFlowTable(V,theta,node_from,node_to,line_Z)
 
     #write functions
     busWrite()
     lineWrite()
+    return
 
 solve_all()
