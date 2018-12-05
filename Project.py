@@ -8,6 +8,7 @@ import os
 from numpy import linalg as LA
 #import numdifftools as nd
 from numpy.linalg import inv
+import csv
 
 #shortcut for block comment = ctrl + 4
 
@@ -22,10 +23,13 @@ scenarioName = "1"
 #basefolder = "/Users/ninavincent/Desktop/Git/project454/"
 basefolder = os.getcwd()
 database = basefolder + "/data/"
-print(database)
+
+#files to read in
 lineCSV = database + "LineData" + scenarioName + ".csv"
 busCSV = database + "BusData" + scenarioName + ".csv"
-
+#files to write out
+busWritefile = database +"BusDataOutput" + scenarioName + ".csv"
+lineWritefile = database +"LineDataOutput" + scenarioName + ".csv"
 
 
 #==============================================================================
@@ -36,6 +40,8 @@ busCSV = database + "BusData" + scenarioName + ".csv"
 MVAbase = 100.
 Eps = .1/MVAbase
 #something else = 20 but can't read my notes
+Vmax = 1.1
+Vmin = 0.9
 
 
 #N = 2
@@ -153,10 +159,24 @@ def busRead():
     return(Bus_num,P_MW, Q_MVAR, bus_type, P_gen, V_set)
 
 #Alex can you write these
-def lineWrite():
+def lineWrite(listOfArrays):
+    toPrint = zip(*listOfArrays)
+    myFile = open(lineWritefile,'w')
+    with myFile:
+        writer = csv.writer(myFile)
+        writer.writerow(["node_from", "node_to", "P_MW", "Q_MVAR", "S_MVA", "Fmax_violation?"])
+        writer.writerows(toPrint)
     return
 
-def busWrite():
+
+def busWrite(listOfArrays):
+    #[Bus_num,bus_type,theta,V,P_MW_new,Q_MVA_new]
+    toPrint = zip(*listOfArrays)
+    myFile = open(busWritefile,'w')
+    with myFile:
+        writer = csv.writer(myFile)
+        writer.writerow(["BusNumber","Type","theta (deg)","V (pu)","P_MW","Q_MVA"])
+        writer.writerows(toPrint)
     return
 
 
@@ -338,65 +358,56 @@ def NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps,N):
     PVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")] #PV bus if all but swing
     del PVbuses[0] #removing swing bus
     PQPVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "D" or bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")]
-    del PQPVbuses[0]
-    print(len(PQPVbuses))
-    print(len(PVbuses))
-    m = len(PVbuses)+1
-    print(range(N-m-1))
+    del PQPVbuses[0] #removing swing bus
+
+    m = len(PVbuses)+1 #m value
+
     dPQ =numpy.array([1. for i in range(N-m-1)]) #initializing the dPQ matrix
     theta0 = numpy.array(theta0)
     V0 = numpy.array(V0)
     iteration = 1
 
-
-    while abs(max(dPQ.min(),dPQ.max(), key=abs)) > Eps:
+    while abs(max(dPQ.min(),dPQ.max(), key=abs)) > Eps: #find maximum mismatch to test against eps and iterate if greater than
         print("Iteration: " + str(iteration))
         Pcomp = Pcomputed(G, B, V0, theta0,N)
         Qcomp = Qcomputed(G, B, V0, theta0,N)
-        print("Pcomp")
-        print(Pcomp)
-        print("Qcomp")
-        print(Qcomp)
         #mismatches
         dP = numpy.subtract(Pcomp,numpy.array(Pknown))
         dP = dP[PQPVbuses]
-        print(dP)
 
         dQ = numpy.subtract(Qcomp,numpy.array(Qknown))
-        #dQ = dQ[numpy.array(range(1,N-m+1))] #only save m+1 to N eventually
         dQ = dQ[PQbuses]
-        print("dQ")
-        print(dQ)
-        #printing max mismatch value (absolute value)
-        MaxMismatch(dP, dQ, PQbuses, PQPVbuses)
+        MaxMismatch(dP, dQ, PQbuses, PQPVbuses) #printing max mismatch value (absolute value)
 
         dPQ = numpy.concatenate((dP, dQ))#mismatch vector
 
         #solve jacobian
         J = jacobian(G,B,Pcomp,Qcomp,V0,theta0,PQPVbuses,PQbuses) #should this be dP & dQ or Pcomp and Qcomp?
-        Jinv = inv(J)
+        Jinv = inv(J) #inverse jacobian
         delta = - numpy.dot(Jinv,dPQ) #correction vector
-        print(numpy.array(range(N-1)))
-        #dtheta = delta[numpy.array(range(N-1))]
         dtheta = delta[numpy.array(range(N - 1))]
-        #dtheta = numpy.insert(dtheta, 0, 0.)
-        print(theta0[PQPVbuses])
         theta0[PQPVbuses] = theta0[PQPVbuses] + dtheta
 
-        print(theta0[PQPVbuses] + dtheta)
-        print(theta0[PQPVbuses])
-        print(theta0)
-
         dV = delta[numpy.array(range(N-1,2*N-m-1))]
-        #dV = numpy.insert(dV, 0, 0.)
-        #dV = numpy.insert(dV, range(N-m+1,N), 0.) #eventually change to other way
         V0[PQbuses] =  V0[PQbuses] + dV
-        print(V0)
-        print(theta0)
-        Eps_found = max(abs(dPQ)) #find maximum mismatch and iterate
         iteration = iteration + 1
     #theta0 = rad2deg(theta0) #converting to degrees instead of radians
-    return (theta0,V0,Pcomp,Qcomp)
+    [P_new, Q_new] = solveExplicit(G, B, theta0, V0, Pknown, Qknown, N)
+    return (theta0,V0,P_new,Q_new)
+
+
+def solveExplicit(G,B,theta,V,Pknown,Qknown,N):
+    Pcomp = Pcomputed(G, B, V, theta, N)
+    Qcomp = Qcomputed(G, B, V, theta, N)
+    return(Pcomp,Qcomp)
+
+def V_violation(V):
+    Vviolation = ["No" for i in range(N)]
+    for i in range(N):
+        if (V[i]>Vmax or V[i]<Vmin):
+            Vviolation[i] = "Yes"
+    return Vviolation
+
 
 
 #NewtonRaphson(bus_types,Ybus,Pt,Qt,thetat,Vt,Eps)
@@ -433,17 +444,15 @@ print(Q_sol_MVA)
 #==============================================================================
 
 
-def calclineflow(V,theta, node_from,node_to,Z,Fmax,Nl):
+def calclineflow(V_pu,theta, node_from,node_to,Z,Fmax,Nl):
     Pline = [0. for i in range(Nl)]
     Qline = [0. for i in range(Nl)]
     Sline = [0. for i in range(Nl)]
     Smagline = [0. for i in range(Nl)]
     violation = ["No" for i in range(Nl)]
-    print(node_to)
+    V = numpy.multiply(V_pu,MVAbase)
     for line in range(Nl):
-        print(line)
         nfrom = node_from[line]
-        print(nfrom)
         nto = node_to[line]
         Vdrop = V[nfrom-1]-V[nto-1]
         I = Vdrop*Z[line]
@@ -452,9 +461,8 @@ def calclineflow(V,theta, node_from,node_to,Z,Fmax,Nl):
         Qline[line] = Sline[line].imag
         Smagline[line] = abs(Sline[line])
         if Smagline[line] > Fmax[line]:
-            print(line)
             violation[line] = "Yes"
-    return (Pline,Qline,Sline)
+    return (Pline,Qline,Smagline,violation)
 
 
 
@@ -520,22 +528,10 @@ def solve_all():
     N = len(buses[1]) #number of buses
     Nl = len(lines[1]) #number of lines
     #create new objects for lines
-    node_from = lines[0]
-    node_to = lines[1]
-    print(node_to)
-    line_R = lines[2]
-    line_X = lines[3]
-    line_B = lines[4]
-    line_Fmax = lines[5]
-    line_Z = lines[6]
+    [node_from,node_to,line_R,line_X,line_B,line_Fmax,line_Z]=lines
     #create new objects for buses
-    #Bus_num,P_MW, Q_MVAR, bus_type, P_gen, V_set
-    Bus_num = buses[0]
-    P_MW = buses[1]
-    Q_MVAR = buses[2]
-    bus_type = buses[3]
-    P_MW_gen = buses[4]
-    V_set = buses[5]
+    [Bus_num,P_MW,Q_MVAR,bus_type,P_MW_gen,V_set] = buses
+
     theta = [0. for i in range(N)]#initialize theta
 
     P_gen_pu = [x / MVAbase for x in P_MW_gen]
@@ -552,15 +548,20 @@ def solve_all():
     print(node_to)
     NR = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
     # LineFlowTable = LineFlowTable(Vtest,theta_test,node_from, node_to, Z,Fmax)
-    theta = NR[0]
-    V = NR[1]
+    [theta,V,P_pu_new,Q_pu_new] = NR
+    VViolation = V_violation(V)
     print(node_to)
     LineFlow= calclineflow(V,theta, node_from,node_to,line_Z,line_Fmax,Nl)
-    LineFlowTable = LineFlowTable(V,theta,node_from,node_to,line_Z)
-
+    [Pline,Qline,Smagline,MVAviolation]=LineFlow
+    #LineFlowTable = LineFlowTable(V,theta,node_from,node_to,line_Z)
+    theta = rad2deg(theta) #converting to degrees instead of radians
     #write functions
-    busWrite()
-    lineWrite()
+    P_MW_new = numpy.multiply(P_pu_new,MVAbase)
+    Q_MVA_new = numpy.multiply(Q_pu_new,MVAbase)
+    busWrite([Bus_num,bus_type,theta,P_MW_new,Q_MVA_new,V,VViolation]) #need to reorder these
+    #node_from, node_to, R_values, X_values, B_values, Fmax_values, Z_values
+    lineWrite([node_from,node_to,Pline,Qline,Smagline,MVAviolation])
+    #lineWrite()
     return
 
 solve_all()
