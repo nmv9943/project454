@@ -40,8 +40,9 @@ lineWritefile = database +"LineDataOutput" + scenarioName + ".csv"
 MVAbase = 100.
 Eps = .1/MVAbase
 #something else = 20 but can't read my notes
-Vmax = 1.1
-Vmin = 0.9
+Vmax = 1.05
+Vmin = 0.95
+nround = 5 #number of decimals to round to
 
 
 #N = 2
@@ -144,6 +145,16 @@ def busRead():
     
     return(Bus_num,P_MW, Q_MVAR, bus_type, P_gen, V_set)
 
+#==============================================================================
+#  Functions about initializing data or things to do at the beginning
+#==============================================================================
+
+#converts power to pu units
+def toPU(P_MW_gen,P_MW,Q_MVAR):
+    P_gen_pu = [x / MVAbase for x in P_MW_gen]
+    P_load_pu = [x / MVAbase for x in P_MW]
+    Q_load_pu = [x / MVAbase for x in Q_MVAR]
+    return (P_gen_pu, P_load_pu,Q_load_pu)
 
 
 #==============================================================================
@@ -185,6 +196,7 @@ def admittance_matrix(node_from, node_to, R_values, X_values, B_values, Fmax_val
         Y_matrix[end_node-1][end_node-1] += complex(0,shunt)
 
     return(Y_matrix)
+
 
 #==============================================================================
 #  Functions about forming power system equations
@@ -296,7 +308,7 @@ def NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps,N):
     PQPVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "D" or bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")]
     del PQPVbuses[0] #removing swing bus
 
-    m = len(PVbuses)+1 #m value
+    m = len(PVbuses)+1 #m value (there are m-1 PVbuses)
 
     dPQ =numpy.array([1. for i in range(N-m-1)]) #initializing the dPQ matrix
     theta0 = numpy.array(theta0)
@@ -370,9 +382,9 @@ def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl):
         Qline[line] = Sline[line].imag
         Smagline[line] = abs(Sline[line])
         # rescale powers to not pu
-        Smag_MVA[line] = Smagline[line] * MVAbase
-        Pline_MW[line] = Pline[line]* MVAbase
-        Qline_MVAR[line] = Qline[line] * MVAbase
+        Smag_MVA[line] = numpy.round(Smagline[line] * MVAbase,nround)
+        Pline_MW[line] = numpy.round(Pline[line]* MVAbase,nround)
+        Qline_MVAR[line] = numpy.round(Qline[line] * MVAbase,nround)
         if Smagline[line] > Fmax[line]:
             violation[line] = "Yes"
     return (Pline_MW,Qline_MVAR,Smag_MVA,violation)
@@ -455,38 +467,49 @@ def linePrint(node_from,node_to,Pline,Qline,Smagline,MVAviolation):
         print('Apparent Power flow violation? ' + MVAviolation[i])
     return
 
+
 def solve_all():
     #read in data files
     buses = busRead()
     lines = lineRead()
+
     N = len(buses[1]) #number of buses
     Nl = len(lines[1]) #number of lines
+
     #create new objects for lines
     [node_from,node_to,line_R,line_X,line_B,line_Fmax,line_Z]=lines
     #create new objects for buses
     [Bus_num,P_MW,Q_MVAR,bus_type,P_MW_gen,V_set] = buses
 
-    theta = [0. for i in range(N)]#initialize theta
+    #conversion to pu units
+    [P_gen_pu, P_load_pu,Q_load_pu] = toPU(P_MW_gen,P_MW,Q_MVAR)
 
-    P_gen_pu = [x / MVAbase for x in P_MW_gen]
-    P_load_pu = [x / MVAbase for x in P_MW]
-    Q_load_pu = [x / MVAbase for x in Q_MVAR]
+    #initializations
     Q_gen_pu = [0. for i in range(N)] #initialize Q generation matrix
+    theta = [0. for i in range(N)]  # initialize theta
+
+    #create Ybus matrix
     Ybus = admittance_matrix(node_from.copy(), node_to.copy(), line_R.copy(), line_X.copy(), line_B.copy(), line_Fmax.copy(), line_Z.copy())
+
+    #calculate P & Q injections
     P_inj = numpy.subtract(P_gen_pu,P_load_pu)
     Q_inj = numpy.subtract(Q_gen_pu,Q_load_pu)
-    NR = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
-    [theta,V,P_pu_new,Q_pu_new] = NR
+
+    #perform Newton Raphson method to solve for implicit equations
+    [theta, V, P_pu_new, Q_pu_new] = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
+
+    #check for violations
     VViolation = V_violation(V,N)
-    LineFlow = calclineflow(V,theta, node_from,node_to,line_Z,line_B,line_Fmax,Nl)
-    [Pline,Qline,Smagline,MVAviolation] = LineFlow
+
+    #calculate power flows on transmission lines
+    [Pline, Qline, Smagline, MVAviolation] = calclineflow(V,theta, node_from,node_to,line_Z,line_B,line_Fmax,Nl)
+
     #LineFlowTable = LineFlowTable(V,theta,node_from,node_to,line_Z)
     theta = rad2deg(theta) #converting to degrees instead of radians
 
-    roundnum = 5
     #multiply by MVAbase so not pu anymore
-    P_MW_new = numpy.round(numpy.multiply(P_pu_new,MVAbase),roundnum)
-    Q_MVAR_new = numpy.round(numpy.multiply(Q_pu_new,MVAbase),roundnum)
+    P_MW_new = numpy.round(numpy.multiply(P_pu_new,MVAbase),nround)
+    Q_MVAR_new = numpy.round(numpy.multiply(Q_pu_new,MVAbase),nround)
     
     # Writing results to the output window
     busPrint(Bus_num,bus_type,theta,P_MW_new,Q_MVAR_new,V,VViolation)
