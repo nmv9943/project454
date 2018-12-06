@@ -16,7 +16,7 @@ import csv
 # Input File
 #==============================================================================
 
-scenarioName = "4" #this is base case
+scenarioName = "1" #this is base case
 #scenarioName = "2" #this is contingency case #2
 #scenarioName = "3" #this is contingency case #3
 
@@ -359,19 +359,20 @@ def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl,Ybus):
     Sline = [0. for i in range(Nl)]
     Smagline = [0. for i in range(Nl)]
     MVAviolation = ["No" for i in range(Nl)]
+    V_complex = [0. for i in range(len(V_pu))]
+    #creating a complex V
+    for i in range(len(V_pu)):
+        V_complex[i] = cmath.rect(V_pu[i], theta[i])
+    #iterating through each line to calculate power flows
     for line in range(Nl):
         nfrom = node_from[line]
         nto = node_to[line]
-        Vdrop = V_pu[nfrom-1]-V_pu[nto-1]
-        #I_line = Vdrop*Ybus[nfrom-1][nto-1]
+        Vdrop = V_complex[nfrom-1]-V_complex[nto-1]
         I_line = Vdrop * -Ybus[nfrom - 1][nto - 1] #diagonals have -Y
-        print(I_line)
-        # multiply V by conjugate and rescale powers to not pu
-        Sline[line] = V_pu[nfrom-1]*I_line.conjugate() * MVAbase
-        print(Sline[line])
-        Pline[line] = Sline[line].real
-        Qline[line] = Sline[line].imag
-        Smagline[line] = abs(Sline[line])
+        Sline[line] = V_complex[nfrom-1]*I_line.conjugate() * MVAbase # multiply V by conjugate and rescale powers to not pu
+        Pline[line] = Sline[line].real #active power
+        Qline[line] = Sline[line].imag #reactive power
+        Smagline[line] = abs(Sline[line]) #apparent power
         if Smagline[line] > Fmax[line]:
             MVAviolation[line] = "Yes"
     return (Pline,Qline,Smagline,MVAviolation)
