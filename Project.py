@@ -11,10 +11,9 @@ import csv
 # Input File
 #==============================================================================
 
-scenarioName = "4" #this is base case
+scenarioName = "1" #this is base case
 #scenarioName = "2" #this is contingency case #2
 #scenarioName = "3" #this is contingency case #3
-
 
 #setting base
 basefolder = os.getcwd()
@@ -94,7 +93,6 @@ def lineRead():
 def busRead():
     infile = open(busCSV, 'r')
     Bus_num, P_load, Q_load, Type, P_gen, V_set = [],[],[],[],[],[] #initialization
-    
     # Extracts the column headers from the BusData file before iterating through
     # and organizing the data into the appropriate list
     grab_headers = False
@@ -324,7 +322,6 @@ def jacobian(G,B,P,Q,V,theta,PQPVbuses,PQbuses):
 # Input: mismatch values dP and dQ, PQbuses (which buses are PQ), and PQPVbuses (which buses are PQ or PV)
 # Output: nothing but prints the values.
 def MaxMismatch(dP,dQ,PQbuses,PQPVbuses):
-
     #print largest P mismatch and the bus
     absdP = [abs(item) for item in dP] #take absolute value of each dP
     maxPmismatch = max(absdP) #finds the max absolute dP
@@ -383,19 +380,20 @@ def NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps,N):
     #initializations
     theta0 = numpy.array(theta0)
     V0 = numpy.array(V0)
+    iteration = 0 #start at iteration 0 (this is for printing mismatch information)
 
+    print('======== Newton Raphson Mismatch Information ========')
+    print("Iteration: " + str(iteration))
     #calculate starting mismatch
     [Pcomp,Qcomp,dPQ] = calc_Mismatches(G, B, V0, theta0, N, Pknown, Qknown, PQbuses, PQPVbuses)
 
-    iteration = 1 #first iteration
-    print('======== Newton Raphson Mismatch Information ========')
     # find maximum mismatch to check for convergence and iterate if greater than eps
     while abs(max(dPQ.min(),dPQ.max(), key=abs)) > Eps:
+        iteration = iteration + 1
         print("Iteration: " + str(iteration))
         #solve NR for this iteration
         [theta0,V0] = NR_correction(G, B, Pcomp, Qcomp,dPQ, V0, theta0,PQbuses, PQPVbuses,N,m)
         [Pcomp,Qcomp,dPQ] = calc_Mismatches(G, B, V0, theta0, N, Pknown, Qknown, PQbuses, PQPVbuses)
-        iteration = iteration + 1
 
     #solve explicit equations
     [P_new, Q_new] = solveComputed(G, B, theta0, V0, N) # Note - because it's easier when coding, I'm just resolving implicit and explicit equations because I will get the same result
@@ -426,13 +424,16 @@ def NR_correction(G, B, Pcomp, Qcomp,dPQ, V0, theta0,PQbuses, PQPVbuses,N,m):
 #  Functions about solving the power flow on lines
 #==============================================================================
 
+# This function calculate the power flow over lines and if there is a violation
 #
-def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl,Ybus):
-    #initializing
-    Pline = [0. for i in range(Nl)]
-    Qline = [0. for i in range(Nl)]
-    Sline = [0. for i in range(Nl)]
-    Smagline = [0. for i in range(Nl)]
+def calc_LineFlow(V_pu,theta, node_from,node_to,Fmax,Nl,Z_line,B_line):
+    #initializing new parameters
+    Pline_to2from = [0. for i in range(Nl)]
+    Qline_to2from = [0. for i in range(Nl)]
+    Smagline_to2from = [0. for i in range(Nl)]
+    Pline_from2to = [0. for i in range(Nl)]
+    Qline_from2to = [0. for i in range(Nl)]
+    Smagline_from2to = [0. for i in range(Nl)]
     MVAviolation = ["No" for i in range(Nl)]
     V_complex = [0. for i in range(len(V_pu))]
     #creating a complex V
@@ -440,29 +441,44 @@ def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl,Ybus):
         V_complex[i] = cmath.rect(V_pu[i], theta[i])
     #iterating through each line to calculate power flows
     for line in range(Nl):
+        #first check the flow from -> to
         nfrom = node_from[line]
         nto = node_to[line]
-        #Pline[line]=-(V_pu[nfrom-1]*V_pu[nto-1])*Ybus[nfrom-1][nto - 1]*cos(theta[nfrom-1]-theta[nto-1])
-        Vdrop = V_complex[nfrom-1]-V_complex[nto-1]
-        I_line = Vdrop * -Ybus[nfrom - 1][nto - 1] #diagonals have -Y
-        Sline[line] = V_complex[nfrom-1]*I_line.conjugate() * MVAbase # multiply V by conjugate and rescale powers to not pu
-        Pline[line] = Sline[line].real #active power
-        Qline[line] = Sline[line].imag #reactive power
-        Smagline[line] = abs(Sline[line]) #apparent power
-        # This next part checks if it violates the MVA limit of the line and says yes if apparent power S is greater than Fmax
-        if Smagline[line] > Fmax[line]:
+        [Smag,P,Q] = calc_flows_oneline(nfrom,nto,V_complex,Z_line[line],B_line[line])
+        Smagline_from2to[line] = Smag
+        Pline_from2to[line] = P
+        Qline_from2to[line] = Q
+        #next check the flow to -> from
+        [Smag,P,Q] = calc_flows_oneline(nto,nfrom,V_complex,Z_line[line],B_line[line])
+        Smagline_to2from[line] = Smag
+        Pline_to2from[line] = P
+        Qline_to2from[line] = Q
+        # This next part checks if either (from to to) or (to to from) violates the MVA limit of the line and says yes if apparent power S is greater than Fmax
+        if (Smagline_from2to[line] > Fmax[line] or Smagline_to2from[line] > Fmax[line]):
             MVAviolation[line] = "Yes"
-    return (Pline,Qline,Smagline,MVAviolation)
+    return (Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,MVAviolation)
+
+def calc_flows_oneline(nfrom,nto,V_complex,Z,B):
+    Vdrop = V_complex[nfrom - 1] - V_complex[nto - 1]
+    I_line = Vdrop / Z  # the series current
+    if B == 0:  # avoiding 0/0 with if statement
+        I_shunt = 0
+    else:
+        I_shunt = V_complex[nfrom - 1] * (complex(0, B) / 2)  # the shunt current
+    I_total = I_line + I_shunt
+    S = V_complex[nfrom - 1] * I_total.conjugate() * MVAbase  # multiply V by conjugate and rescale powers to not pu
+    P = S.real  # active power
+    Q = S.imag  # reactive power
+    Smag = abs(S)  # apparent power
+    return (Smag,P,Q)
 
 #==============================================================================
 #  Functions about wrapping up data
 #==============================================================================
 
 # rounds all values that need rounding
-def roundAll(Pline, Qline, Smagline, P_MW, Q_MVAR, V, theta,P_MW_gen_solved,Q_MVAR_gen_solved):
-    return (numpy.round(Pline, nround), numpy.round(Qline, nround), numpy.round(Smagline, nround),
-            numpy.round(P_MW, nround), numpy.round(Q_MVAR, nround), numpy.round(V, nround),
-            numpy.round(theta, nround),numpy.round(P_MW_gen_solved,nround),numpy.round(Q_MVAR_gen_solved,nround))
+def roundAll(Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved):
+    return (numpy.round(Smagline_from2to,nround), numpy.round(Pline_from2to,nround), numpy.round(Qline_from2to,nround), numpy.round(Smagline_to2from,nround), numpy.round(Pline_to2from,nround), numpy.round(Qline_to2from,nround), numpy.round(V,nround), numpy.round(theta,nround), numpy.round(P_MW_gen_solved,nround), numpy.round(Q_MVAR_gen_solved,nround))
 
 
 #==============================================================================
@@ -508,7 +524,8 @@ def lineWrite(listOfArrays):
     myFile = open(lineWritefile,'w')
     with myFile:
         writer = csv.writer(myFile)
-        writer.writerow(["node_from", "node_to", "P (MW)", "Q (MVAr)", "S (MVA)", "Fmax_violation?"]) #write headers
+        # node_from,node_to,Pline_from2to,Qline_from2to,Smagline_from2to,Pline_to2from,Qline_to2from,Smagline_to2from,MVAviolation
+        writer.writerow(["node_from", "node_to", "P(from2to)(MW)", "Q(from2to) (MVAr)", "S(from2to) (MVA)","P(to2from)(MW)", "Q(to2from) (MVAr)", "S(to2from) (MVA)" "Fmax_violation?"]) #write headers
         writer.writerows(toPrint)
     return
 
@@ -527,7 +544,6 @@ def busWrite(listOfArrays):
 #==============================================================================
 #  Functions that puts all functions together and solves
 #==============================================================================
-
 
 def solve_all():
     #read in data files
@@ -562,8 +578,8 @@ def solve_all():
     # check for voltage violations
     VViolation = V_violation(V,N)
 
-    # calculate power flows on transmission lines
-    [Pline, Qline, Smagline, MVAviolation] = calclineflow(V,theta, node_from,node_to,line_Z,line_B,line_Fmax,Nl,Ybus)
+    # calculate power flows on transmission lines and violations
+    [Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,MVAviolation] = calc_LineFlow(V,theta, node_from,node_to,line_Fmax,Nl,line_Z,line_B)
 
     theta = rad2deg(theta) #converting to degrees instead of radians
 
@@ -576,15 +592,16 @@ def solve_all():
     Q_MVAR_gen_solved = numpy.add(Q_MVAR,Q_MVAR_load)
 
     #rounds these values
-    [Pline, Qline, Smagline,P_MW,Q_MVAR,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved]=roundAll(Pline, Qline, Smagline,P_MW,Q_MVAR,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved)
+    [Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved]=roundAll(Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved)
 
     # Writing results to the output window
     busPrint(Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation)
-    linePrint(node_from,node_to,Pline,Qline,Smagline,MVAviolation)
+    linePrint(node_from,node_to,Pline_from2to,Qline_from2to,Smagline_from2to,MVAviolation)
     
     # Writing results to two output files in the data folder
     busWrite([Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation])
-    lineWrite([node_from,node_to,Pline,Qline,Smagline,MVAviolation])
+    lineWrite([node_from,node_to,Pline_from2to,Qline_from2to,Smagline_from2to,Pline_to2from,Qline_to2from,Smagline_to2from,MVAviolation])
     return
 
-solve_all() # actually running everything
+# actually running everything
+solve_all()
