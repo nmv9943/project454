@@ -238,21 +238,19 @@ def Jpartsolve(G,B,P,Q,V,theta,J_same,J_diff,rangej,rangek):
     Jpart = [[0.] * (len(rangej)) for i in range(len(rangek))]
 
     for j in rangej:
-        j1 = j
         Vj = V[j]
         matrix_j = rangej.index(j)
 
         for k in rangek:
-            k1 = k
             matrix_k = rangek.index(k)
-            Vk = V[k1]
-            Bkj = B[k1][j1]
-            Gkj = G[k1][j1]
+            Vk = V[k]
+            Bkj = B[k][j]
+            Gkj = G[k][j]
             if j==k:
-                Jpart[matrix_k][matrix_j]=J_same(Vk,P[k1],Q[k1],Gkj,Bkj)
+                Jpart[matrix_k][matrix_j]=J_same(Vk,P[k],Q[k],Gkj,Bkj)
             else:
-                Vj = V[j1]
-                thetakj = theta[k1] - theta[j1]
+                Vj = V[j]
+                thetakj = theta[k] - theta[j]
                 Jpart[matrix_k][matrix_j] = J_diff(Vk, Vj, Gkj, Bkj,thetakj)
     return numpy.array(Jpart)
 
