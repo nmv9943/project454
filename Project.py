@@ -31,17 +31,20 @@ lineWritefile = database +"LineDataOutput" + scenarioName + ".csv"
 # Constants
 #==============================================================================
 
-MVAbase = 100.
-Eps = .1/MVAbase
+MVAbase = 100. #this is the MVA base
+Eps = .1/MVAbase #this is epsilon (aka, tolerance of convergence for Newton Raphson (NR))
+
 #eventually will check that V is within this range (pu) at each bus
 Vmax = 1.05
 Vmin = 0.95
-nround = 2 #number of decimals to round to
 
+#number of decimals to round to
+nround = 2
 
 #==============================================================================
 # Misc functions
 #==============================================================================
+
 #converts radians to degrees
 def rad2deg(rad):
     return rad/(2*math.pi)*360
@@ -100,21 +103,17 @@ def busRead():
         entries = line.split(',')
         if grab_headers:
             Bus_num.append(int(entries[0]))
-            
             # Initialize swing bus real power at 0.
             if entries[1] == '':
                 P_load.append(0)
             else:
                 P_load.append(float(entries[1])) #change to pu
-            
             # Initialize swing bus reactive power at 0.
             if entries[2] == '':
                 Q_load.append(0)
             else:    
                 Q_load.append(float(entries[2])) #change to pu
-                
             Type.append(entries[3])
-            
             # All buses without generation -> set real power generation to 0.
             if entries[3] == 'G':
                 P_gen.append(0)
@@ -122,7 +121,6 @@ def busRead():
                 P_gen.append(0)
             else:
                 P_gen.append(float(entries[4]))
-            
             # Initialize all empty V set points to 1
             if entries[5].rstrip() == '':
                 V_set.append(float(1))
@@ -193,9 +191,12 @@ def admittance_matrix(node_from, node_to, B_values, Z_values):
 
 # --------Functions about forming power system equations ----------------------
 
-#This function solves for the computed active power
+# This function solves for the computed active power
+# Input: G,B,V,theta,N
+# Output: Pcomp (computed P injection)
 def Pcomputed(G,B, V, theta,N):
-    Pcomp = [0.] * (N)
+    Pcomp = [0.] * (N) #intializing
+    # loop through each bus index k, then sum all P power flow equations against all buses
     for k in range(N):
         tmp = 0
         for i in range(N):
@@ -204,9 +205,12 @@ def Pcomputed(G,B, V, theta,N):
         Pcomp[k] = tmp
     return numpy.array(Pcomp)
 
-#This function solves for the computed reactive power
+# This function solves for the computed reactive power
+# Input: G,B,V,theta,N
+# Output: Qcomp (computed Q injection)
 def Qcomputed(G,B,V,theta,N):
-    Qcomp = [0.] * (N)
+    Qcomp = [0.] * (N) #intializing
+    #loop through each bus index k, then sum all Q power flow equations against all buses
     for k in range(N):
         tmp = 0
         for i in range(N):
@@ -333,10 +337,13 @@ def MaxMismatch(dP,dQ,PQbuses,PQPVbuses):
     maxQmismatch = max(absdQ) #finds the max absolute dP
     i =absdQ.index(maxQmismatch) #backsolves for which bus this occurs at
     print("Largest Q mismatch: " + str(maxQmismatch) +" pu at bus: "+str(PQbuses[i])) #prints the values
+    print('')
 
     return
 
-# Function that given a bus_types array, returns which index are PVbuses (PV buses), which index are PQbuses (PQ buses), and which index are PQPV buses (PQ or PV buses)
+# Function that finds which are PQ and PV buses
+# given a bus_types array,
+# returns which index are PVbuses (PV buses), which index are PQbuses (PQ buses), and which index are PQPV buses (PQ or PV buses)
 def bus_Types(bus_types):
     # PQ bus if only load
     PQbuses = [i for i in range(len(bus_types)) if bus_types[i] == "D"]
@@ -425,7 +432,8 @@ def NR_correction(G, B, Pcomp, Qcomp,dPQ, V0, theta0,PQbuses, PQPVbuses,N,m):
 #==============================================================================
 
 # This function calculate the power flow over lines and if there is a violation
-#
+# Input: V_pu (per unit voltage array), theta (V angle array), node_from array, node_to array, Fmax (maximum MVA limit array), Nl (number lines), Z_line (line impedance array), B_line (shunt suseptance)
+# Output:
 def calc_LineFlow(V_pu,theta, node_from,node_to,Fmax,Nl,Z_line,B_line):
     #initializing new parameters
     Pline_to2from = [0. for i in range(Nl)]
@@ -441,9 +449,9 @@ def calc_LineFlow(V_pu,theta, node_from,node_to,Fmax,Nl,Z_line,B_line):
         V_complex[i] = cmath.rect(V_pu[i], theta[i])
     #iterating through each line to calculate power flows
     for line in range(Nl):
-        #first check the flow from -> to
         nfrom = node_from[line]
         nto = node_to[line]
+        #first check the flow from -> to
         [Smag,P,Q] = calc_flows_oneline(nfrom,nto,V_complex,Z_line[line],B_line[line])
         Smagline_from2to[line] = Smag
         Pline_from2to[line] = P
@@ -458,14 +466,17 @@ def calc_LineFlow(V_pu,theta, node_from,node_to,Fmax,Nl,Z_line,B_line):
             MVAviolation[line] = "Yes"
     return (Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,MVAviolation)
 
+# This function calculates the line flow for one line (is iterated through in calc_LineFlow)
+# Inputs: nfrom, nto vector, complex voltage vector, Z, B of the specific line
+# outputs magnitude of S over the line, P over the line, Q over the line
 def calc_flows_oneline(nfrom,nto,V_complex,Z,B):
-    Vdrop = V_complex[nfrom - 1] - V_complex[nto - 1]
+    Vdrop = V_complex[nfrom - 1] - V_complex[nto - 1] #voltage drop between the 2 bus voltages
     I_line = Vdrop / Z  # the series current
     if B == 0:  # avoiding 0/0 with if statement
         I_shunt = 0
     else:
         I_shunt = V_complex[nfrom - 1] * (complex(0, B) / 2)  # the shunt current
-    I_total = I_line + I_shunt
+    I_total = I_line + I_shunt #adding series and shunt currents
     S = V_complex[nfrom - 1] * I_total.conjugate() * MVAbase  # multiply V by conjugate and rescale powers to not pu
     P = S.real  # active power
     Q = S.imag  # reactive power
@@ -485,6 +496,8 @@ def roundAll(Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline
 #  Functions about writing results to the output window
 #==============================================================================
 
+# This function prints the bus information to terminal
+# Prints Bus number, bus type, theta, P produced by generator (MW), Q produced by generator (MVAr), V (pu), and VViolation (if voltage is violated)
 def busPrint(Bus_num,bus_type,theta,P_MW_new,Q_MVAR_new,V,VViolation):
     # Printing the bus information
     print('======== Bus Information ========')    
@@ -498,17 +511,17 @@ def busPrint(Bus_num,bus_type,theta,P_MW_new,Q_MVAR_new,V,VViolation):
             print('Reactive Power Produced by Generator: ' + str(Q_MVAR_new[i]) + ' MVAR')
         print('')
     return
-        
-def linePrint(node_from,node_to,Pline,Qline,Smagline,MVAviolation):
+
+# This function prints the line information to terminal
+# Prints Line From to To, apparent power in that flow direction and if there is a violation in max MVA
+def linePrint(node_from,node_to,Smagline,MVAviolation):
     # Printing the line information
     print('======== Line Information ========')
     for i in range(max(node_to)):
         print('')
         print('Line ' + str(node_from[i]) + ' to ' + str(node_to[i]))
-        print('Active Power: ' + str(Pline[i]) + ' MW')
-        print('Reactive Power: ' + str(Qline[i]) + ' MVAR')
-        print('Apparent Power: ' + str(Smagline[i]) + ' MVA')
-        print('Apparent Power flow violation? ' + MVAviolation[i])
+        print('Apparent Power (in that direction): ' + str(Smagline[i]) + ' MVA')
+        print('Apparent Power flow violation (in either direction)? ' + MVAviolation[i])
     return
 
 #==============================================================================
@@ -524,7 +537,6 @@ def lineWrite(listOfArrays):
     myFile = open(lineWritefile,'w')
     with myFile:
         writer = csv.writer(myFile)
-        # node_from,node_to,Pline_from2to,Qline_from2to,Smagline_from2to,Pline_to2from,Qline_to2from,Smagline_to2from,MVAviolation
         writer.writerow(["node_from", "node_to", "P(from2to)(MW)", "Q(from2to) (MVAr)", "S(from2to) (MVA)","P(to2from)(MW)", "Q(to2from) (MVAr)", "S(to2from) (MVA)" "Fmax_violation?"]) #write headers
         writer.writerows(toPrint)
     return
@@ -545,6 +557,8 @@ def busWrite(listOfArrays):
 #  Functions that puts all functions together and solves
 #==============================================================================
 
+# This function puts all functions together and solves for all V,theta,P,Q of generators, P,Q,S of lines, etc.
+# Writes solution to csv files / prints
 def solve_all():
     #read in data files
     buses = busRead()
@@ -581,7 +595,8 @@ def solve_all():
     # calculate power flows on transmission lines and violations
     [Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,MVAviolation] = calc_LineFlow(V,theta, node_from,node_to,line_Fmax,Nl,line_Z,line_B)
 
-    theta = rad2deg(theta) #converting to degrees instead of radians
+    #converting to degrees instead of radians
+    theta = rad2deg(theta)
 
     # multiply by MVAbase so not pu anymore
     P_MW = numpy.multiply(P_pu_new,MVAbase)
@@ -596,7 +611,7 @@ def solve_all():
 
     # Writing results to the output window
     busPrint(Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation)
-    linePrint(node_from,node_to,Pline_from2to,Qline_from2to,Smagline_from2to,MVAviolation)
+    linePrint(node_from,node_to,Smagline_from2to,MVAviolation)
     
     # Writing results to two output files in the data folder
     busWrite([Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation])
