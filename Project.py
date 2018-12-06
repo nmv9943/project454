@@ -304,7 +304,7 @@ def NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps,N):
     theta0 = numpy.array(theta0)
     V0 = numpy.array(V0)
     iteration = 1
-
+    print('======== Newton Raphson Mismatch Information ========')
     while abs(max(dPQ.min(),dPQ.max(), key=abs)) > Eps: #find maximum mismatch to test against eps and iterate if greater than
         print("Iteration: " + str(iteration))
         Pcomp = Pcomputed(G, B, V0, theta0,N)
@@ -400,8 +400,7 @@ def busWrite(listOfArrays):
     myFile = open(busWritefile,'w')
     with myFile:
         writer = csv.writer(myFile)
-        #[Bus_num,bus_type,theta,P_MW_new,Q_MVA_new,V,VViolation]
-        writer.writerow(["BusNumber","Type","theta (deg)","V (pu)","P_MW","Q_MVA","V_Violation"])
+        writer.writerow(["BusNumber","Type","theta (deg)","P_MW","Q_MVAR","V (pu)","V_Violation"])
         writer.writerows(toPrint)
     return
 
@@ -479,7 +478,6 @@ def solve_all():
     P_inj = numpy.subtract(P_gen_pu,P_load_pu)
     Q_inj = numpy.subtract(Q_gen_pu,Q_load_pu)
     NR = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
-    # LineFlowTable = LineFlowTable(Vtest,theta_test,node_from, node_to, Z,Fmax)
     [theta,V,P_pu_new,Q_pu_new] = NR
     VViolation = V_violation(V,N)
     LineFlow = calclineflow(V,theta, node_from,node_to,line_Z,line_B,line_Fmax,Nl)
