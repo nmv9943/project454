@@ -18,7 +18,9 @@ import csv
 
 
 
-scenarioName = "1"
+scenarioName = "1" #this is base case
+#scenarioName = "2" #this is contingency case #2
+#scenarioName = "3" #this is contingency case #3
 
 #basefolder = "/Users/ninavincent/Desktop/Git/project454/"
 basefolder = os.getcwd()
@@ -158,26 +160,6 @@ def busRead():
     
     return(Bus_num,P_MW, Q_MVAR, bus_type, P_gen, V_set)
 
-#Alex can you write these
-def lineWrite(listOfArrays):
-    toPrint = zip(*listOfArrays)
-    myFile = open(lineWritefile,'w')
-    with myFile:
-        writer = csv.writer(myFile)
-        writer.writerow(["node_from", "node_to", "P_MW", "Q_MVAR", "S_MVA", "Fmax_violation?"])
-        writer.writerows(toPrint)
-    return
-
-
-def busWrite(listOfArrays):
-    #[Bus_num,bus_type,theta,V,P_MW_new,Q_MVA_new]
-    toPrint = zip(*listOfArrays)
-    myFile = open(busWritefile,'w')
-    with myFile:
-        writer = csv.writer(myFile)
-        writer.writerow(["BusNumber","Type","theta (deg)","V (pu)","P_MW","Q_MVA"])
-        writer.writerows(toPrint)
-    return
 
 
 #==============================================================================
@@ -225,7 +207,6 @@ def admittance_matrix(node_from, node_to, R_values, X_values, B_values, Fmax_val
 #==============================================================================
 def Pcomputed(G,B, V, theta,N):
     Pcomp = [0.] * (N)
-    print(Pcomp)
     for k in range(N):
         tmp = 0
         for i in range(N):
@@ -236,7 +217,6 @@ def Pcomputed(G,B, V, theta,N):
 
 def Qcomputed(G,B,V,theta,N):
     Qcomp = [0.] * (N)
-    print(Qcomp)
     for k in range(N):
         tmp = 0
         for i in range(N):
@@ -272,11 +252,6 @@ def J22_diff(Vk,Vj,Gkj,Bkj,thetakj):
 #function that computes each jacobian part (aka J11, J21, J12, J22)
 def Jpartsolve(G,B,P,Q,V,theta,J_same,J_diff,rangej,rangek):
     Jpart = [[0.] * (len(rangej)) for i in range(len(rangek))]
-
-    print(len(rangej))
-    print(len(rangek))
-    print(rangej)
-    print(rangek)
     for j in rangej:
         #j1 = j+1
         j1 = j
@@ -284,7 +259,6 @@ def Jpartsolve(G,B,P,Q,V,theta,J_same,J_diff,rangej,rangek):
         matrix_j = rangej.index(j)
 
         for k in rangek:
-            print(k)
             #k1 = k+1
             k1 = k
             matrix_k = rangek.index(k)
@@ -297,16 +271,12 @@ def Jpartsolve(G,B,P,Q,V,theta,J_same,J_diff,rangej,rangek):
                 Vj = V[j1]
                 thetakj = theta[k1] - theta[j1]
                 Jpart[matrix_k][matrix_j] = J_diff(Vk, Vj, Gkj, Bkj,thetakj)
-                #print(Jpart[k-1][j-1])
     return numpy.array(Jpart)
 
 #This function computes the Jacobian of a power system
 def jacobian(G,B,P,Q,V,theta,PQPVbuses,PQbuses):
-    #rangeP = range(N - 1)
-    #rangePQ = range(N - m)
     J11 = Jpartsolve(G,B,P,Q,V,theta,J11_same,J11_diff,PQPVbuses,PQPVbuses)
     J21 = Jpartsolve(G,B,P,Q,V,theta,J21_same,J21_diff,PQPVbuses,PQbuses)
-    #J21 = Jpartsolve(G, B, P, Q, V, theta, J21_same, J21_diff, PQbuses, PQPVbuses)
     J12 = Jpartsolve(G,B,P,Q,V,theta,J12_same,J12_diff,PQbuses,PQPVbuses)
     J22 = Jpartsolve(G,B,P,Q,V,theta,J22_same,J22_diff,PQbuses,PQbuses)
     J = numpy.concatenate((numpy.concatenate((J11,J12),axis=1),
@@ -336,15 +306,13 @@ def MaxMismatch(dP,dQ,PQbuses,PQPVbuses):
     #print largest P mismatch and the bus
     absdP = [abs(item) for item in dP]
     maxPmismatch = max(absdP)
-    print("Largest P mismatch: "+str(maxPmismatch))
     i =absdP.index(maxPmismatch)
-    print("At bus: "+str(PQPVbuses[i]))
+    print("Largest P mismatch: " + str(maxPmismatch) +" pu at bus: "+str(PQPVbuses[i]))
     #print largest Q mimatch and the bus
     absdQ = [abs(item) for item in dQ]
     maxQmismatch = max(absdQ)
-    print("Largest Q mismatch: "+str(maxQmismatch))
     i =absdQ.index(maxQmismatch)
-    print("At bus: "+str(PQbuses[i]))
+    print("Largest Q mismatch: " + str(maxQmismatch) +" pu at bus: "+str(PQbuses[i]))
     return
 
 # Computes the solution of a system of equations using the Newton Raphson method
@@ -401,80 +369,81 @@ def solveExplicit(G,B,theta,V,Pknown,Qknown,N):
     Qcomp = Qcomputed(G, B, V, theta, N)
     return(Pcomp,Qcomp)
 
-def V_violation(V):
+def V_violation(V,N):
     Vviolation = ["No" for i in range(N)]
     for i in range(N):
         if (V[i]>Vmax or V[i]<Vmin):
             Vviolation[i] = "Yes"
     return Vviolation
 
-
-
-#NewtonRaphson(bus_types,Ybus,Pt,Qt,thetat,Vt,Eps)
-"""
-theta_sol = NRsol[0]
-V_sol = NRsol[1]
-P_sol_pu = NRsol[2]
-Q_sol_pu = NRsol[3]
-
-P_sol_MVA = P_sol_pu * MVAbase
-Q_sol_MVA = Q_sol_pu * MVAbase
-print(P_sol_MVA)
-print(Q_sol_MVA)
-"""
-
-
-
-
-#buses = busRead()
-#N = len(buses[1])
-#print(N)
-#lines=lineRead()
-#Nl = len(lines[0])
-#node_from = lines[0]
-#node_to = lines[1]
-#line_R = lines[2]
-#line_X = lines[3]
-#print(Nl)
-#print(line_R)
-#print(line_X)
-
 #==============================================================================
 #  Functions about solving the power flow on lines
 #==============================================================================
 
 
-def calclineflow(V_pu,theta, node_from,node_to,Z,Fmax,Nl):
+def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl):
     Pline = [0. for i in range(Nl)]
     Qline = [0. for i in range(Nl)]
     Sline = [0. for i in range(Nl)]
     Smagline = [0. for i in range(Nl)]
+    Pline_MW = [0. for i in range(Nl)]
+    Qline_MVAR = [0. for i in range(Nl)]
+    Smag_MVA = [0. for i in range(Nl)]
     violation = ["No" for i in range(Nl)]
-    V = numpy.multiply(V_pu,MVAbase)
     for line in range(Nl):
+        print(line)
         nfrom = node_from[line]
         nto = node_to[line]
-        Vdrop = V[nfrom-1]-V[nto-1]
-        I = Vdrop*Z[line]
-        Sline[line] = Vdrop*I.conjugate()
+        Vdrop = V_pu[nfrom-1]-V_pu[nto-1]
+        I_line = Vdrop/Z[line]
+        print(I_line)
+        I_shunt = V_pu[nfrom-1]*(complex(0,B[line]/2))
+        #I_total = I_line + I_shunt
+        I_total = I_line
+        Sline[line] = Vdrop*I_total.conjugate()
         Pline[line] = Sline[line].real
         Qline[line] = Sline[line].imag
         Smagline[line] = abs(Sline[line])
+        # rescale powers to not pu
+        Smag_MVA[line] = Smagline[line] * MVAbase
+        Pline_MW[line] = Pline[line]* MVAbase
+        Qline_MVAR[line] = Qline[line] * MVAbase
         if Smagline[line] > Fmax[line]:
             violation[line] = "Yes"
-    return (Pline,Qline,Smagline,violation)
+    #rescale powers to not pu
+    #Smag_MVA = numpy.multiply(Smagline, MVAbase)
+    #Pline_MW = numpy.multiply(Pline, MVAbase)
+    #Qline_MVAR = numpy.multiply(Qline, MVAbase)
+    return (Pline_MW,Qline_MVAR,Smag_MVA,violation)
 
 
 
-Vtest = [1.05,1.045,1.01,1.0,.95,.9,1.05,1.1,1.0,1.05,1.0,1.05]
-theta_test = [0,.1,0,0,-.1,.05,.4,0,.6,.3,-.1,.2]
-Fmax = [200,400,float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf'),float('inf')]
+#==============================================================================
+#  Functions about writing output files
+#==============================================================================
+def lineWrite(listOfArrays):
+    toPrint = zip(*listOfArrays)
+    myFile = open(lineWritefile,'w')
+    with myFile:
+        writer = csv.writer(myFile)
+        writer.writerow(["node_from", "node_to", "P_MW", "Q_MVAR", "S_MVA", "Fmax_violation?"])
+        writer.writerows(toPrint)
+    return
 
+
+def busWrite(listOfArrays):
+    #[Bus_num,bus_type,theta,V,P_MW_new,Q_MVA_new]
+    toPrint = zip(*listOfArrays)
+    myFile = open(busWritefile,'w')
+    with myFile:
+        writer = csv.writer(myFile)
+        #[Bus_num,bus_type,theta,P_MW_new,Q_MVA_new,V,VViolation]
+        writer.writerow(["BusNumber","Type","theta (deg)","V (pu)","P_MW","Q_MVA","V_Violation"])
+        writer.writerows(toPrint)
+    return
 
 def LineFlowTable(V, theta, node_from, node_to, Z,Fmax):
-    print(Nl)
-    print(Fmax)
-    LineFlows = calclineflow(V,theta, node_from,node_to,Z,Fmax)
+    LineFlows = calclineflow(V,theta, node_from,node_to,Z,B,Fmax)
     Pline = LineFlows[0]
     Qline = LineFlows[1]
     Sline = LineFlows[2]
@@ -496,30 +465,7 @@ def LineFlowTable(V, theta, node_from, node_to, Z,Fmax):
         LineFlows[line][4] =  S.real #P value
         LineFlows[line][5] =  S.imag #Q value
     return LineFlows
-"""
-node_from = lines[0]
-node_to = lines[1]
-R = lines[2]
-X = lines[3]
-Z=lines[6]
-Fmax = lines[5]
-"""
-#NRsol = NewtonRaphson(bus_types,Ybus,Pt,Qt,thetat,Vt,Eps)
-#LineFlowTable = LineFlowTable(Vtest,theta_test,node_from, node_to, Z,Fmax)
-print(LineFlowTable)
-#(node_from, node_to, R_values, X_values, B_values, Fmax_values, Z_values)
 
-#def BusPInj():
-#    for k in range(N):
-#        for i in range(N):
-#            Sinj
-
-V=[1.0,1.05,1.1,1.15,1.2,1.25,7,8,9,10]
-print(V[0])
-GD = [2,3,1,4]
-for i in GD:
-    print(i)
-    print(V[(i-1)])
 
 def solve_all():
     #read in data files
@@ -541,24 +487,25 @@ def solve_all():
     Ybus = admittance_matrix(node_from.copy(), node_to.copy(), line_R.copy(), line_X.copy(), line_B.copy(), line_Fmax.copy(), line_Z.copy())
     P_inj = numpy.subtract(P_gen_pu,P_load_pu)
     Q_inj = numpy.subtract(Q_gen_pu,Q_load_pu)
-    print(node_to)
-    print(P_inj)
-    print(Q_inj)
-    #NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps):
-    print(node_to)
+    #print(node_to)
+    #print(P_inj)
+    #print(Q_inj)
+    #print(node_to)
     NR = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
     # LineFlowTable = LineFlowTable(Vtest,theta_test,node_from, node_to, Z,Fmax)
     [theta,V,P_pu_new,Q_pu_new] = NR
-    VViolation = V_violation(V)
-    print(node_to)
-    LineFlow= calclineflow(V,theta, node_from,node_to,line_Z,line_Fmax,Nl)
+    VViolation = V_violation(V,N)
+    LineFlow= calclineflow(V,theta, node_from,node_to,line_Z,line_B,line_Fmax,Nl)
     [Pline,Qline,Smagline,MVAviolation]=LineFlow
     #LineFlowTable = LineFlowTable(V,theta,node_from,node_to,line_Z)
     theta = rad2deg(theta) #converting to degrees instead of radians
-    #write functions
-    P_MW_new = numpy.multiply(P_pu_new,MVAbase)
-    Q_MVA_new = numpy.multiply(Q_pu_new,MVAbase)
-    busWrite([Bus_num,bus_type,theta,P_MW_new,Q_MVA_new,V,VViolation]) #need to reorder these
+
+    roundnum = 5
+    #multiply by MVAbase so not pu anymore
+    P_MW_new = numpy.round(numpy.multiply(P_pu_new,MVAbase),roundnum)
+    Q_MVA_new = numpy.round(numpy.multiply(Q_pu_new,MVAbase),roundnum)
+    # write functions
+    busWrite([Bus_num,bus_type,theta,V,P_MW_new,Q_MVA_new,VViolation]) #need to reorder these
     #node_from, node_to, R_values, X_values, B_values, Fmax_values, Z_values
     lineWrite([node_from,node_to,Pline,Qline,Smagline,MVAviolation])
     #lineWrite()
