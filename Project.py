@@ -189,10 +189,11 @@ def admittance_matrix(node_from, node_to, B_values, Z_values):
 
     return(Y_matrix)
 
+#==============================================================================
+#  Functions about solving Newton-Raphson
+#==============================================================================
 
-#==============================================================================
-#  Functions about forming power system equations
-#==============================================================================
+# --------Functions about forming power system equations ----------------------
 
 #This function solves for the computed active power
 def Pcomputed(G,B, V, theta,N):
@@ -216,9 +217,41 @@ def Qcomputed(G,B,V,theta,N):
         Qcomp[k] = tmp
     return numpy.array(Qcomp)
 
-#==============================================================================
-#  Functions about creating the Jacobian for solving the Newton Raphson power flow
-#==============================================================================
+# This function solves the computed equations (puts above 2 together)
+# Used within calc_Mismatches function and eventually finding explicit equations
+# Inputs: G,B,theta,V, N
+# Outputs: Pcomp (Pcomputed), Qcomp (Qcomputed)
+def solveComputed(G,B,theta,V,N):
+    Pcomp = Pcomputed(G, B, V, theta, N)
+    Qcomp = Qcomputed(G, B, V, theta, N)
+    return(Pcomp,Qcomp)
+
+# This function calculates the mismatches and computed values
+# Inputs: G,B,V0,theta0,N,Pknown,Qknown,PQbuses,PQPVbuses
+# Outputs: Pcomputed, Qcomputed, and mismatch vector dPQ
+def calc_Mismatches(G,B,V0,theta0,N,Pknown,Qknown,PQbuses,PQPVbuses):
+    # -----solve computed values ---------
+    #Pcomp = Pcomputed(G, B, V0, theta0, N)
+    #Qcomp = Qcomputed(G, B, V0, theta0, N)
+    [Pcomp,Qcomp]=solveComputed(G,B,theta0,V0,N)
+
+    # ------ calculate mismatches -------
+    #calculate mismatches for P and Q vectors
+    dP = numpy.subtract(Pcomp, numpy.array(Pknown))
+    dP = dP[PQPVbuses] #only keep PQPV bus values for P (those are known)
+
+    dQ = numpy.subtract(Qcomp, numpy.array(Qknown))
+    dQ = dQ[PQbuses] #only keep PQ bus values for Q (those are known)
+
+    # printing max mismatch value (absolute value)
+    MaxMismatch(dP, dQ, PQbuses, PQPVbuses)
+
+    # combine mismatches to get total mismatch vector
+    dPQ = numpy.concatenate((dP, dQ))
+    return (Pcomp,Qcomp,dPQ)
+
+
+# ----------- Functions about creating the Jacobian ---------------------
 
 #This returns an element in the J11 section of the Jacobian matrix if j=k
 def J11_same(Vk,Pk,Qk,Gkk,Bkk):
@@ -282,9 +315,9 @@ def jacobian(G,B,P,Q,V,theta,PQPVbuses,PQbuses):
     return J
 
 
-#==============================================================================
-#  Functions about Newton-Raphson
-#==============================================================================
+
+# ----------------- Other misc supporting Newton Raphson functions ----------------------------------
+
 
 # This function solves and prints the maximum absolute mismatch of P & Q (and which bus it's at)
 # for each NR iteration
@@ -321,60 +354,60 @@ def bus_Types(bus_types):
 
     return(PVbuses,PQbuses,PQPVbuses)
 
+#This function determines if there is a violation in the voltage of each bus
+# inputs: V (solved bus voltage vector), N (number of buses)
+# outputs: Vviolation (a vector of yes or no's if the voltage is out of the given Vmin, Vmax range)
+def V_violation(V,N):
+    Vviolation = ["No" for i in range(N)] #initializing vector to "No" - not violating
+    for i in range(N): #for each bus
+        # if outside range, update violation to "Yes"
+        if (V[i]>Vmax or V[i]<Vmin):
+            Vviolation[i] = "Yes"
+    return Vviolation
+
+
+# ----------------- functions directly solving Newton-Raphson ----------------------------------
+
+
 # Computes the solution of a system of equations using the Newton Raphson method
+# This puts together all other functions pertaining to NR
 # inputs: initial P and Q, initial theta0, initial V0, tolerance (epsilon)
 # outputs: solutions for theta and V
 def NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps,N):
     #extracts G and B values from Ybus (G is real element, B is imaginary element)
     G = [list(numpy.array(x).real) for x in Ybus]
     B = [list(numpy.array(x).imag) for x in Ybus]
-
     # which are PQ buses and PV buses?
     [PVbuses,PQbuses, PQPVbuses] = bus_Types(bus_types)
     m = len(PVbuses)+1 #m value (there are m-1 PVbuses)
-
     #initializations
-    dPQ =numpy.array([1. for i in range(N-m-1)]) #initializing the dPQ matrix
     theta0 = numpy.array(theta0)
     V0 = numpy.array(V0)
 
+    #calculate starting mismatch
+    [Pcomp,Qcomp,dPQ] = calc_Mismatches(G, B, V0, theta0, N, Pknown, Qknown, PQbuses, PQPVbuses)
+
     iteration = 1 #first iteration
     print('======== Newton Raphson Mismatch Information ========')
-
-    # find maximum mismatch to test against eps and iterate if greater than
+    # find maximum mismatch to check for convergence and iterate if greater than eps
     while abs(max(dPQ.min(),dPQ.max(), key=abs)) > Eps:
         print("Iteration: " + str(iteration))
-
         #solve NR for this iteration
-        [theta0,V0,dPQ] = NR_iterate(G, B, V0, theta0, N, m, Qknown, Pknown, PQbuses, PQPVbuses)
+        [theta0,V0] = NR_correction(G, B, Pcomp, Qcomp,dPQ, V0, theta0,PQbuses, PQPVbuses,N,m)
+        [Pcomp,Qcomp,dPQ] = calc_Mismatches(G, B, V0, theta0, N, Pknown, Qknown, PQbuses, PQPVbuses)
         iteration = iteration + 1
 
-    [P_new, Q_new] = solveExplicit(G, B, theta0, V0, N)
-
+    #solve explicit equations
+    [P_new, Q_new] = solveComputed(G, B, theta0, V0, N) # Note - because it's easier when coding, I'm just resolving implicit and explicit equations because I will get the same result
     return (theta0,V0,P_new,Q_new)
 
-# This function is one iteration of solving the implicit power flow equations using the Newton Raphson method
-# Inputs: G,B,V0,theta0,N,m,Qknown,Pknown,PQbuses,PQPVbuses
-# Output: updated V0 and theta0 values to be closer to
-def NR_iterate(G,B,V0,theta0,N,m,Qknown,Pknown,PQbuses, PQPVbuses):
-    # -----solve computed values ---------
-    Pcomp = Pcomputed(G, B, V0, theta0, N)
-    Qcomp = Qcomputed(G, B, V0, theta0, N)
 
-    # ----------Mismatches ---------------
-    dP = numpy.subtract(Pcomp, numpy.array(Pknown))
-    dP = dP[PQPVbuses] #only keep PQPV bus values for P (those are known)
 
-    dQ = numpy.subtract(Qcomp, numpy.array(Qknown))
-    dQ = dQ[PQbuses] #only keep PQ bus values for Q (those are known)
-
-    # printing max mismatch value (absolute value)
-    MaxMismatch(dP, dQ, PQbuses, PQPVbuses)
-
-    # combine mismatches to get total mismatch vector
-    dPQ = numpy.concatenate((dP, dQ))
-
-    # -----------solve correction --------------
+# This function is an iteration of solving implicit equations for updated V and theta values using the Newton Raphson method
+# Inputs: G, B, Pcomp, Qcomp,dPQ, V0, theta0,PQbuses, PQPVbuses,N,m
+# Output: updated V0 and theta0 values
+def NR_correction(G, B, Pcomp, Qcomp,dPQ, V0, theta0,PQbuses, PQPVbuses,N,m):
+    #  solve for correction vector
     J = jacobian(G, B, Pcomp, Qcomp, V0, theta0, PQPVbuses, PQbuses)  # solve Jacobian
     Jinv = inv(J)  # inverse jacobian
     delta = - numpy.dot(Jinv, dPQ)  # correction vector
@@ -386,29 +419,14 @@ def NR_iterate(G,B,V0,theta0,N,m,Qknown,Pknown,PQbuses, PQPVbuses):
     #update the theta and V values of specified buses
     theta0[PQPVbuses] = theta0[PQPVbuses] + dtheta
     V0[PQbuses] = V0[PQbuses] + dV
-    return (theta0,V0,dPQ)
+    return (theta0,V0)
 
-# This function solves the explicit equations
-# Inputs: G,B,theta-solved,V-solved, N
-# Note - because it's easier when coding, I'm just resolving implicit and explicit equations because I will get the same result
-def solveExplicit(G,B,theta,V,N):
-    Pcomp = Pcomputed(G, B, V, theta, N)
-    Qcomp = Qcomputed(G, B, V, theta, N)
-    return(Pcomp,Qcomp)
-
-#This function determines if there is a violation in
-def V_violation(V,N):
-    Vviolation = ["No" for i in range(N)]
-    for i in range(N):
-        if (V[i]>Vmax or V[i]<Vmin):
-            Vviolation[i] = "Yes"
-    return Vviolation
 
 #==============================================================================
 #  Functions about solving the power flow on lines
 #==============================================================================
 
-
+#
 def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl,Ybus):
     #initializing
     Pline = [0. for i in range(Nl)]
@@ -431,6 +449,7 @@ def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl,Ybus):
         Pline[line] = Sline[line].real #active power
         Qline[line] = Sline[line].imag #reactive power
         Smagline[line] = abs(Sline[line]) #apparent power
+        # This next part checks if it violates the MVA limit of the line and says yes if apparent power S is greater than Fmax
         if Smagline[line] > Fmax[line]:
             MVAviolation[line] = "Yes"
     return (Pline,Qline,Smagline,MVAviolation)
