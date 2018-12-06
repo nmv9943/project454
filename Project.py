@@ -16,7 +16,7 @@ import csv
 # Input File
 #==============================================================================
 
-scenarioName = "1" #this is base case
+scenarioName = "4" #this is base case
 #scenarioName = "2" #this is contingency case #2
 #scenarioName = "3" #this is contingency case #3
 
@@ -36,20 +36,12 @@ lineWritefile = database +"LineDataOutput" + scenarioName + ".csv"
 # Constants
 #==============================================================================
 
-
 MVAbase = 100.
 Eps = .1/MVAbase
-#something else = 20 but can't read my notes
 Vmax = 1.05
 Vmin = 0.95
 nround = 5 #number of decimals to round to
 
-
-#N = 2
-#Matrix = [[0.] * N for i in range(N)]
-#N = 5 #number of buses
-#m = #number of PV buses
-#Nl = 4 #number of lines
 
 #==============================================================================
 # Misc functions
@@ -360,36 +352,70 @@ def V_violation(V,N):
 #==============================================================================
 
 
-def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl):
+def calclineflow(V_pu,theta, node_from,node_to,Z,B,Fmax,Nl,Ybus):
+    #initializing
     Pline = [0. for i in range(Nl)]
     Qline = [0. for i in range(Nl)]
     Sline = [0. for i in range(Nl)]
     Smagline = [0. for i in range(Nl)]
-    Pline_MW = [0. for i in range(Nl)]
-    Qline_MVAR = [0. for i in range(Nl)]
-    Smag_MVA = [0. for i in range(Nl)]
-    violation = ["No" for i in range(Nl)]
+    MVAviolation = ["No" for i in range(Nl)]
     for line in range(Nl):
         nfrom = node_from[line]
         nto = node_to[line]
         Vdrop = V_pu[nfrom-1]-V_pu[nto-1]
-        I_line = Vdrop/Z[line]
-        I_shunt = V_pu[nfrom-1]*(complex(0,B[line]/2))
-        #I_total = I_line + I_shunt
-        I_total = I_line
-        Sline[line] = Vdrop*I_total.conjugate()
+        #I_line = Vdrop*Ybus[nfrom-1][nto-1]
+        I_line = Vdrop * -Ybus[nfrom - 1][nto - 1] #diagonals have -Y
+        print(I_line)
+        # multiply V by conjugate and rescale powers to not pu
+        Sline[line] = V_pu[nfrom-1]*I_line.conjugate() * MVAbase
+        print(Sline[line])
         Pline[line] = Sline[line].real
         Qline[line] = Sline[line].imag
         Smagline[line] = abs(Sline[line])
-        # rescale powers to not pu
-        Smag_MVA[line] = numpy.round(Smagline[line] * MVAbase,nround)
-        Pline_MW[line] = numpy.round(Pline[line]* MVAbase,nround)
-        Qline_MVAR[line] = numpy.round(Qline[line] * MVAbase,nround)
         if Smagline[line] > Fmax[line]:
-            violation[line] = "Yes"
-    return (Pline_MW,Qline_MVAR,Smag_MVA,violation)
+            MVAviolation[line] = "Yes"
+    return (Pline,Qline,Smagline,MVAviolation)
+
+#==============================================================================
+#  Functions about wrapping up data
+#==============================================================================
+
+# rounds all values that need rounding
+def roundAll(Pline, Qline, Smagline, P_MW, Q_MVAR, V, theta,P_MW_gen_solved,Q_MVAR_gen_solved):
+    return (numpy.round(Pline, nround), numpy.round(Qline, nround), numpy.round(Smagline, nround),
+            numpy.round(P_MW, nround), numpy.round(Q_MVAR, nround), numpy.round(V, nround),
+            numpy.round(theta, nround),numpy.round(P_MW_gen_solved,nround),numpy.round(Q_MVAR_gen_solved,nround))
 
 
+#==============================================================================
+#  Functions about writing results to the output window
+#==============================================================================
+
+def busPrint(Bus_num,bus_type,theta,P_MW_new,Q_MVAR_new,V,VViolation):
+    # Printing the bus information
+    print('======== Bus Information ========')    
+    for i in range(max(Bus_num)):
+        print('Bus ' + str(i+1))
+        print('Voltage: ' + str(V[i]) + ' p.u.')
+        print('Voltage violation? ' + VViolation[i])
+        print('Angle: ' + str(theta[i]) + ' degrees')
+        if (bus_type[i] == 'G' or bus_type[i] == 'DG'):
+            print('Real Power Produced by Generator: ' + str(P_MW_new[i]) + ' MW')
+            print('Reactive Power Produced by Generator: ' + str(Q_MVAR_new[i]) + ' MVAR')
+        print('')
+    return
+        
+def linePrint(node_from,node_to,Pline,Qline,Smagline,MVAviolation):
+    # Printing the line information
+    print('======== Line Information ========')
+    for i in range(max(node_to)):
+        print('')
+        print('Line ' + str(node_from[i]) + ' to ' + str(node_to[i]))
+        print('Active Power: ' + str(Pline[i]) + ' MW')
+        print('Reactive Power: ' + str(Qline[i]) + ' MVAR')
+        print('Apparent Power: ' + str(Smagline[i]) + ' MVA')
+        print('Apparent Power flow violation? ' + MVAviolation[i])
+    return
 
 #==============================================================================
 #  Functions about writing output files
@@ -410,62 +436,13 @@ def busWrite(listOfArrays):
     myFile = open(busWritefile,'w')
     with myFile:
         writer = csv.writer(myFile)
-        writer.writerow(["BusNumber","Type","theta (deg)","P_MW","Q_MVAR","V (pu)","V_Violation"])
+        writer.writerow(["BusNumber","Type","theta (deg)","P_MW_gen","Q_MVAR_gen","V (pu)","V_Violation?"])
         writer.writerows(toPrint)
     return
 
-def LineFlowTable(V, theta, node_from, node_to, Z,Fmax):
-    #print(Nl)
-    #print(Fmax)
-    LineFlows = calclineflow(V,theta, node_from,node_to,Z,Fmax)
-    Pline = LineFlows[0]
-    Qline = LineFlows[1]
-    Sline = LineFlows[2]
-    LineFlows = [[0.] * 10 for x in range(Nl)]
-    for line in range(Nl):
-        #print(line)
-        nfrom = node_from[line]
-        #print(nfrom)
-        nto = node_to[line]
-        LineFlows[line][0]= nfrom
-        LineFlows[line][1]= nto
-        S = lineS[nfrom-1][nto-1]
-        LineFlows[line][2] = S #S value
-        LineFlows[line][3] = abs(S) #S magnitude
-        LineFlows[line][4] =  S.real #P value
-        LineFlows[line][5] =  S.imag #Q value
-    return LineFlows
-
-
 #==============================================================================
-#  Functions about writing results to the output window
+#  Functions that puts all functions together and solves the whole problem
 #==============================================================================
-
-def busPrint(Bus_num,bus_type,theta,P_MW_new,Q_MVAR_new,V,VViolation):
-    # Printing the bus information
-    print('======== Bus Information ========')    
-    for i in range(max(Bus_num)):
-        print('Bus ' + str(i+1))
-        print('Voltage: ' + str(V[i]) + ' p.u.')
-        print('Angle: ' + str(theta[i]) + ' degrees')
-        if (bus_type[i] == 'G' or bus_type[i] == 'DG'):
-            print('Real Power Produced: ' + str(P_MW_new[i]) + ' MW')
-            print('Reactive Power Produced: ' + str(Q_MVAR_new[i]) + ' MVAR')
-            print('Voltage violation? ' + VViolation[i])
-        print('')
-    return
-        
-def linePrint(node_from,node_to,Pline,Qline,Smagline,MVAviolation):
-    # Printing the line information
-    print('======== Line Information ========')
-    for i in range(max(node_to)):
-        print('')
-        print('Line ' + str(node_from[i]) + ' to ' + str(node_to[i]))
-        print('Active Power: ' + str(Pline[i]) + ' MW')
-        print('Reactive Power: ' + str(Qline[i]) + ' MVAR')
-        print('Apparent Power: ' + str(Smagline[i]) + ' MVA')
-        print('Apparent Power flow violation? ' + MVAviolation[i])
-    return
 
 
 def solve_all():
@@ -479,10 +456,10 @@ def solve_all():
     #create new objects for lines
     [node_from,node_to,line_R,line_X,line_B,line_Fmax,line_Z]=lines
     #create new objects for buses
-    [Bus_num,P_MW,Q_MVAR,bus_type,P_MW_gen,V_set] = buses
+    [Bus_num,P_MW_load,Q_MVAR_load,bus_type,P_MW_gen,V_set] = buses
 
     #conversion to pu units
-    [P_gen_pu, P_load_pu,Q_load_pu] = toPU(P_MW_gen,P_MW,Q_MVAR)
+    [P_gen_pu, P_load_pu,Q_load_pu] = toPU(P_MW_gen,P_MW_load,Q_MVAR_load)
 
     #initializations
     Q_gen_pu = [0. for i in range(N)] #initialize Q generation matrix
@@ -491,33 +468,41 @@ def solve_all():
     #create Ybus matrix
     Ybus = admittance_matrix(node_from.copy(), node_to.copy(), line_R.copy(), line_X.copy(), line_B.copy(), line_Fmax.copy(), line_Z.copy())
 
-    #calculate P & Q injections
+    # calculate (initial) P & Q injections
     P_inj = numpy.subtract(P_gen_pu,P_load_pu)
     Q_inj = numpy.subtract(Q_gen_pu,Q_load_pu)
 
-    #perform Newton Raphson method to solve for implicit equations
+    # perform Newton Raphson method to solve the power flow equations
     [theta, V, P_pu_new, Q_pu_new] = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
 
-    #check for violations
+    # check for violations
     VViolation = V_violation(V,N)
 
-    #calculate power flows on transmission lines
-    [Pline, Qline, Smagline, MVAviolation] = calclineflow(V,theta, node_from,node_to,line_Z,line_B,line_Fmax,Nl)
+    # calculate power flows on transmission lines
+    [Pline, Qline, Smagline, MVAviolation] = calclineflow(V,theta, node_from,node_to,line_Z,line_B,line_Fmax,Nl,Ybus)
 
     #LineFlowTable = LineFlowTable(V,theta,node_from,node_to,line_Z)
     theta = rad2deg(theta) #converting to degrees instead of radians
 
-    #multiply by MVAbase so not pu anymore
-    P_MW_new = numpy.round(numpy.multiply(P_pu_new,MVAbase),nround)
-    Q_MVAR_new = numpy.round(numpy.multiply(Q_pu_new,MVAbase),nround)
-    
+    # multiply by MVAbase so not pu anymore
+    P_MW = numpy.multiply(P_pu_new,MVAbase)
+    Q_MVAR = numpy.multiply(Q_pu_new,MVAbase)
+
+    #solving for generator P & Q:
+    P_MW_gen_solved = numpy.add(P_MW,P_MW_load)
+    Q_MVAR_gen_solved = numpy.add(Q_MVAR,Q_MVAR_load)
+
+    #rounds these values
+    [Pline, Qline, Smagline,P_MW,Q_MVAR,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved]=roundAll(Pline, Qline, Smagline,P_MW,Q_MVAR,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved)
+
     # Writing results to the output window
-    busPrint(Bus_num,bus_type,theta,P_MW_new,Q_MVAR_new,V,VViolation)
+    busPrint(Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation)
     linePrint(node_from,node_to,Pline,Qline,Smagline,MVAviolation)
     
     # Writing results to two output files in the data folder
-    busWrite([Bus_num,bus_type,theta,P_MW_new,Q_MVAR_new,V,VViolation]) 
+    busWrite([Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation])
     lineWrite([node_from,node_to,Pline,Qline,Smagline,MVAviolation])
     return
 
+#actually running it
 solve_all()
