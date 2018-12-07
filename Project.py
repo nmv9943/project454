@@ -542,7 +542,8 @@ def lineWrite(listOfArrays):
     myFile = open(lineWritefile,'w')
     with myFile:
         writer = csv.writer(myFile)
-        writer.writerow(["node_from", "node_to", "P(from2to)(MW)", "Q(from2to) (MVAr)", "S(from2to) (MVA)","P(to2from)(MW)", "Q(to2from) (MVAr)", "S(to2from) (MVA)" "Fmax_violation?"]) #write headers
+        writer.writerow(["", "", "From to To", "From to To", "From to To", "To to From","To to From", "To to From",""])  # write headers
+        writer.writerow(["node_from", "node_to", "P (MW)", "Q (MVAr)", "S (MVA)","P (MW)", "Q (MVAr)", "S (MVA)", "Fmax_violation?"]) #write headers
         writer.writerows(toPrint)
     return
 
