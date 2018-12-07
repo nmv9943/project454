@@ -264,189 +264,7 @@ def admittance_matrix(node_from, node_to, B_values, Z_values):
 #  Functions about solving Newton-Raphson
 #==============================================================================
 
-# --------Functions about forming power system equations ----------------------
-
-# This function solves for the computed active power
-# Input: G,B,V,theta,N
-# Output: Pcomp (computed P injection)
-def Pcomputed(G,B, V, theta,N):
-    Pcomp = [0.] * (N) #intializing
-    # loop through each bus index k, then sum all P power flow equations against all buses
-    for k in range(N):
-        tmp = 0
-        for i in range(N):
-            thetaki = theta[k]-theta[i]
-            tmp = tmp + V[k]*V[i]*(G[k][i]*cos(thetaki)+B[k][i]*sin(thetaki))
-        Pcomp[k] = tmp
-    return numpy.array(Pcomp)
-
-# This function solves for the computed reactive power
-# Input: G,B,V,theta,N
-# Output: Qcomp (computed Q injection)
-def Qcomputed(G,B,V,theta,N):
-    Qcomp = [0.] * (N) #intializing
-    #loop through each bus index k, then sum all Q power flow equations against all buses
-    for k in range(N):
-        tmp = 0
-        for i in range(N):
-            thetaki = theta[k]-theta[i]
-            tmp = tmp + V[k]*V[i]*(G[k][i]*sin(thetaki)-B[k][i]*cos(thetaki))
-        Qcomp[k] = tmp
-    return numpy.array(Qcomp)
-
-# This function solves the computed equations (puts above 2 together)
-# Used within calc_Mismatches function and eventually finding explicit equations
-# Inputs: G,B,theta,V, N
-# Outputs: Pcomp (Pcomputed), Qcomp (Qcomputed)
-def solveComputed(G,B,theta,V,N):
-    Pcomp = Pcomputed(G, B, V, theta, N)
-    Qcomp = Qcomputed(G, B, V, theta, N)
-    return(Pcomp,Qcomp)
-
-# This function calculates the mismatches and computed values
-# Inputs: G,B,V0,theta0,N,Pknown,Qknown,PQbuses,PQPVbuses
-# Outputs: Pcomputed, Qcomputed, and mismatch vector dPQ
-def calc_Mismatches(G,B,V0,theta0,N,Pknown,Qknown,PQbuses,PQPVbuses):
-    # -----solve computed values ---------
-    #Pcomp = Pcomputed(G, B, V0, theta0, N)
-    #Qcomp = Qcomputed(G, B, V0, theta0, N)
-    [Pcomp,Qcomp]=solveComputed(G,B,theta0,V0,N)
-
-    # ------ calculate mismatches -------
-    #calculate mismatches for P and Q vectors
-    dP = numpy.subtract(Pcomp, numpy.array(Pknown))
-    dP = dP[PQPVbuses] #only keep PQPV bus values for P (those are known)
-
-    dQ = numpy.subtract(Qcomp, numpy.array(Qknown))
-    dQ = dQ[PQbuses] #only keep PQ bus values for Q (those are known)
-
-    # printing max mismatch value (absolute value)
-    MaxMismatch(dP, dQ, PQbuses, PQPVbuses)
-
-    # combine mismatches to get total mismatch vector
-    dPQ = numpy.concatenate((dP, dQ))
-    return (Pcomp,Qcomp,dPQ)
-
-
-# ----------- Functions about creating the Jacobian ---------------------
-
-#This returns an element in the J11 section of the Jacobian matrix if j=k
-def J11_same(Vk,Pk,Qk,Gkk,Bkk):
-    return -Vk**2*Bkk-Qk
-#This returns an element in the J11 section of the Jacobian matrix if j!=k
-def J11_diff(Vk,Vj,Gkj,Bkj,thetakj):
-    return Vk*Vj*(Gkj*sin(thetakj)-Bkj*cos(thetakj))
-
-#This returns an element in the J12 section of the Jacobian matrix if j=k
-def J12_same(Vk,Pk,Qk,Gkk,Bkk):
-    return Pk/Vk+Vk*Gkk
-#This returns an element in the J12 section of the Jacobian matrix if j!=k
-def J12_diff(Vk,Vj,Gkj,Bkj,thetakj):
-    return Vk*(Gkj*cos(thetakj)+Bkj*sin(thetakj))
-
-#This returns an element in the J21 section of the Jacobian matrix if j=k
-def J21_same(Vk,Pk,Qk,Gkk,Bkk):
-    return Pk-Vk**2*Gkk
-#This returns an element in the J21 section of the Jacobian matrix if j!=k
-def J21_diff(Vk,Vj,Gkj,Bkj,thetakj):
-    return -Vk*Vj*(Gkj*cos(thetakj)+Bkj*sin(thetakj))
-
-#This returns an element in the J22 section of the Jacobian matrix if j=k
-def J22_same(Vk,Pk,Qk,Gkk,Bkk):
-    return Qk/Vk-Vk*Bkk
-#This returns an element in the J22 section of the Jacobian matrix if j!=k
-def J22_diff(Vk,Vj,Gkj,Bkj,thetakj):
-    return Vk*(Gkj*sin(thetakj)-Bkj*cos(thetakj))
-
-# Function that computes each Jacobian part (aka J11, J21, J12, J22)
-# Inputs: G,B,P,Q,V,theta, 2 equations for solving each element in the respective J part (one if j=k, one if j!=k)
-# Also, the rangej (which buses to include in j in the jacobian part) and rangek (which buses to include in k when solving jacobian part)
-# Output: one section of the jacobian matrix
-def Jpartsolve(G,B,P,Q,V,theta,J_same,J_diff,rangej,rangek):
-    Jpart = [[0.] * (len(rangej)) for i in range(len(rangek))] #initialization
-
-    for j in rangej: #j is bus j
-        matrix_j = rangej.index(j) #this is the position of j in the Jpart matrix you are at
-        for k in rangek: #this is bus k
-            matrix_k = rangek.index(k) #this is the position of k in the Jpart matrix you are at
-
-            # If j=k, solve the J_same function
-            # If j!=k, solve the J_diff function
-            if j==k:
-                Jpart[matrix_k][matrix_j]=J_same(V[k],P[k],Q[k],G[k][j],B[k][j])
-            else:
-                thetakj = theta[k] - theta[j] #difference between theta k and j
-                Jpart[matrix_k][matrix_j] = J_diff(V[k], V[j], G[k][j], B[k][j],thetakj)
-    return numpy.array(Jpart)
-
-# This function computes the complete Jacobian of the power system
-# Inputs: G,B,P,Q,V,theta, PQPVbuses (the index of all PQ and PV buses), PQbuses (the index of all PQ buses)
-# Output: the solved Jacobian
-def jacobian(G,B,P,Q,V,theta,PQPVbuses,PQbuses):
-    J11 = Jpartsolve(G,B,P,Q,V,theta,J11_same,J11_diff,PQPVbuses,PQPVbuses) #solves J11 section of jacobian
-    J21 = Jpartsolve(G,B,P,Q,V,theta,J21_same,J21_diff,PQPVbuses,PQbuses) #solves J21 section of jacobian
-    J12 = Jpartsolve(G,B,P,Q,V,theta,J12_same,J12_diff,PQbuses,PQPVbuses) #solves J12 section of jacobian
-    J22 = Jpartsolve(G,B,P,Q,V,theta,J22_same,J22_diff,PQbuses,PQbuses) #solves J22 section of jacobian
-    J = numpy.concatenate((numpy.concatenate((J11,J12),axis=1),
-                           numpy.concatenate((J21,J22),axis=1))) #combines them into one J matrix
-    return J
-
-
-
-# ----------------- Other misc supporting Newton Raphson functions ----------------------------------
-
-
-# This function solves and prints the maximum absolute mismatch of P & Q (and which bus it's at)
-# for each NR iteration
-# Input: mismatch values dP and dQ, PQbuses (which buses are PQ), and PQPVbuses (which buses are PQ or PV)
-# Output: nothing but prints the values.
-def MaxMismatch(dP,dQ,PQbuses,PQPVbuses):
-    #print largest P mismatch and the bus
-    absdP = [abs(item) for item in dP] #take absolute value of each dP
-    maxPmismatch = max(absdP) #finds the max absolute dP
-    i =absdP.index(maxPmismatch) #backsolves for which bus this occurs at
-    print("Largest P mismatch: " + str(maxPmismatch) +" pu at bus: "+str(PQPVbuses[i])) #prints the values
-
-    #print largest Q mimatch and the bus
-    absdQ = [abs(item) for item in dQ] #take absolute value of each dP
-    maxQmismatch = max(absdQ) #finds the max absolute dP
-    i =absdQ.index(maxQmismatch) #backsolves for which bus this occurs at
-    print("Largest Q mismatch: " + str(maxQmismatch) +" pu at bus: "+str(PQbuses[i])) #prints the values
-    print('')
-
-    return
-
-# Function that finds which are PQ and PV buses
-# given a bus_types array,
-# returns which index are PVbuses (PV buses), which index are PQbuses (PQ buses), and which index are PQPV buses (PQ or PV buses)
-def bus_Types(bus_types):
-    # PQ bus if only load
-    PQbuses = [i for i in range(len(bus_types)) if bus_types[i] == "D"]
-
-    #PV bus if only gen or gen and load
-    PVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")]
-    del PVbuses[0] #removing swing bus
-
-    #PQ or PV bus only if not swing bus
-    PQPVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "D" or bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")]
-    del PQPVbuses[0] #removing swing bus
-
-    return(PVbuses,PQbuses,PQPVbuses)
-
-#This function determines if there is a violation in the voltage of each bus
-# inputs: V (solved bus voltage vector), N (number of buses)
-# outputs: Vviolation (a vector of yes or no's if the voltage is out of the given Vmin, Vmax range)
-def V_violation(V,N):
-    Vviolation = ["No" for i in range(N)] #initializing vector to "No" - not violating
-    for i in range(N): #for each bus
-        # if outside range, update violation to "Yes"
-        if (V[i]>Vmax or V[i]<Vmin):
-            Vviolation[i] = "Yes"
-    return Vviolation
-
-
 # ----------------- functions directly solving Newton-Raphson ----------------------------------
-
 
 # Computes the solution of a system of equations using the Newton Raphson method
 # This puts together all other functions pertaining to NR
@@ -504,6 +322,187 @@ def NR_correction(G, B, Pcomp, Qcomp,dPQ, V0, theta0,PQbuses, PQPVbuses,N,m):
     V0[PQbuses] = V0[PQbuses] + dV
     return (theta0,V0)
 
+
+# --------Functions about forming power system equations ----------------------
+
+
+# This function calculates the mismatches and computed values
+# Inputs: G,B,V0,theta0,N,Pknown,Qknown,PQbuses,PQPVbuses
+# Outputs: Pcomputed, Qcomputed, and mismatch vector dPQ
+def calc_Mismatches(G,B,V0,theta0,N,Pknown,Qknown,PQbuses,PQPVbuses):
+    # -----solve computed values ---------
+    #Pcomp = Pcomputed(G, B, V0, theta0, N)
+    #Qcomp = Qcomputed(G, B, V0, theta0, N)
+    [Pcomp,Qcomp]=solveComputed(G,B,theta0,V0,N)
+
+    # ------ calculate mismatches -------
+    #calculate mismatches for P and Q vectors
+    dP = numpy.subtract(Pcomp, numpy.array(Pknown))
+    dP = dP[PQPVbuses] #only keep PQPV bus values for P (those are known)
+
+    dQ = numpy.subtract(Qcomp, numpy.array(Qknown))
+    dQ = dQ[PQbuses] #only keep PQ bus values for Q (those are known)
+
+    # printing max mismatch value (absolute value)
+    MaxMismatch(dP, dQ, PQbuses, PQPVbuses)
+
+    # combine mismatches to get total mismatch vector
+    dPQ = numpy.concatenate((dP, dQ))
+    return (Pcomp,Qcomp,dPQ)
+
+# This function solves the computed equations (puts above 2 together)
+# Used within calc_Mismatches function and eventually finding explicit equations
+# Inputs: G,B,theta,V, N
+# Outputs: Pcomp (Pcomputed), Qcomp (Qcomputed)
+def solveComputed(G,B,theta,V,N):
+    Pcomp = Pcomputed(G, B, V, theta, N)
+    Qcomp = Qcomputed(G, B, V, theta, N)
+    return(Pcomp,Qcomp)
+
+# This function solves for the computed active power
+# Input: G,B,V,theta,N
+# Output: Pcomp (computed P injection)
+def Pcomputed(G,B, V, theta,N):
+    Pcomp = [0.] * (N) #intializing
+    # loop through each bus index k, then sum all P power flow equations against all buses
+    for k in range(N):
+        tmp = 0
+        for i in range(N):
+            thetaki = theta[k]-theta[i]
+            tmp = tmp + V[k]*V[i]*(G[k][i]*cos(thetaki)+B[k][i]*sin(thetaki))
+        Pcomp[k] = tmp
+    return numpy.array(Pcomp)
+
+# This function solves for the computed reactive power
+# Input: G,B,V,theta,N
+# Output: Qcomp (computed Q injection)
+def Qcomputed(G,B,V,theta,N):
+    Qcomp = [0.] * (N) #intializing
+    #loop through each bus index k, then sum all Q power flow equations against all buses
+    for k in range(N):
+        tmp = 0
+        for i in range(N):
+            thetaki = theta[k]-theta[i]
+            tmp = tmp + V[k]*V[i]*(G[k][i]*sin(thetaki)-B[k][i]*cos(thetaki))
+        Qcomp[k] = tmp
+    return numpy.array(Qcomp)
+
+
+# ----------- Functions about creating the Jacobian ---------------------
+
+
+# This function computes the complete Jacobian of the power system
+# Inputs: G,B,P,Q,V,theta, PQPVbuses (the index of all PQ and PV buses), PQbuses (the index of all PQ buses)
+# Output: the solved Jacobian
+def jacobian(G,B,P,Q,V,theta,PQPVbuses,PQbuses):
+    J11 = Jpartsolve(G,B,P,Q,V,theta,J11_same,J11_diff,PQPVbuses,PQPVbuses) #solves J11 section of jacobian
+    J21 = Jpartsolve(G,B,P,Q,V,theta,J21_same,J21_diff,PQPVbuses,PQbuses) #solves J21 section of jacobian
+    J12 = Jpartsolve(G,B,P,Q,V,theta,J12_same,J12_diff,PQbuses,PQPVbuses) #solves J12 section of jacobian
+    J22 = Jpartsolve(G,B,P,Q,V,theta,J22_same,J22_diff,PQbuses,PQbuses) #solves J22 section of jacobian
+    J = numpy.concatenate((numpy.concatenate((J11,J12),axis=1),
+                           numpy.concatenate((J21,J22),axis=1))) #combines them into one J matrix
+    return J
+
+# Function that computes each Jacobian part (aka J11, J21, J12, J22)
+# Inputs: G,B,P,Q,V,theta, 2 equations for solving each element in the respective J part (one if j=k, one if j!=k)
+# Also, the rangej (which buses to include in j in the jacobian part) and rangek (which buses to include in k when solving jacobian part)
+# Output: one section of the jacobian matrix
+def Jpartsolve(G,B,P,Q,V,theta,J_same,J_diff,rangej,rangek):
+    Jpart = [[0.] * (len(rangej)) for i in range(len(rangek))] #initialization
+
+    for j in rangej: #j is bus j
+        matrix_j = rangej.index(j) #this is the position of j in the Jpart matrix you are at
+        for k in rangek: #this is bus k
+            matrix_k = rangek.index(k) #this is the position of k in the Jpart matrix you are at
+
+            # If j=k, solve the J_same function
+            # If j!=k, solve the J_diff function
+            if j==k:
+                Jpart[matrix_k][matrix_j]=J_same(V[k],P[k],Q[k],G[k][j],B[k][j])
+            else:
+                thetakj = theta[k] - theta[j] #difference between theta k and j
+                Jpart[matrix_k][matrix_j] = J_diff(V[k], V[j], G[k][j], B[k][j],thetakj)
+    return numpy.array(Jpart)
+
+#This returns an element in the J11 section of the Jacobian matrix if j=k
+def J11_same(Vk,Pk,Qk,Gkk,Bkk):
+    return -Vk**2*Bkk-Qk
+#This returns an element in the J11 section of the Jacobian matrix if j!=k
+def J11_diff(Vk,Vj,Gkj,Bkj,thetakj):
+    return Vk*Vj*(Gkj*sin(thetakj)-Bkj*cos(thetakj))
+
+#This returns an element in the J12 section of the Jacobian matrix if j=k
+def J12_same(Vk,Pk,Qk,Gkk,Bkk):
+    return Pk/Vk+Vk*Gkk
+#This returns an element in the J12 section of the Jacobian matrix if j!=k
+def J12_diff(Vk,Vj,Gkj,Bkj,thetakj):
+    return Vk*(Gkj*cos(thetakj)+Bkj*sin(thetakj))
+
+#This returns an element in the J21 section of the Jacobian matrix if j=k
+def J21_same(Vk,Pk,Qk,Gkk,Bkk):
+    return Pk-Vk**2*Gkk
+#This returns an element in the J21 section of the Jacobian matrix if j!=k
+def J21_diff(Vk,Vj,Gkj,Bkj,thetakj):
+    return -Vk*Vj*(Gkj*cos(thetakj)+Bkj*sin(thetakj))
+
+#This returns an element in the J22 section of the Jacobian matrix if j=k
+def J22_same(Vk,Pk,Qk,Gkk,Bkk):
+    return Qk/Vk-Vk*Bkk
+#This returns an element in the J22 section of the Jacobian matrix if j!=k
+def J22_diff(Vk,Vj,Gkj,Bkj,thetakj):
+    return Vk*(Gkj*sin(thetakj)-Bkj*cos(thetakj))
+
+
+# ----------------- Other misc supporting Newton Raphson functions ----------------------------------
+
+
+# This function solves and prints the maximum absolute mismatch of P & Q (and which bus it's at)
+# for each NR iteration
+# Input: mismatch values dP and dQ, PQbuses (which buses are PQ), and PQPVbuses (which buses are PQ or PV)
+# Output: nothing but prints the values.
+def MaxMismatch(dP,dQ,PQbuses,PQPVbuses):
+    #print largest P mismatch and the bus
+    absdP = [abs(item) for item in dP] #take absolute value of each dP
+    maxPmismatch = max(absdP) #finds the max absolute dP
+    i =absdP.index(maxPmismatch) #backsolves for which bus this occurs at
+    print("Largest P mismatch: " + str(maxPmismatch) +" pu at bus: "+str(PQPVbuses[i])) #prints the values
+
+    #print largest Q mimatch and the bus
+    absdQ = [abs(item) for item in dQ] #take absolute value of each dP
+    maxQmismatch = max(absdQ) #finds the max absolute dP
+    i =absdQ.index(maxQmismatch) #backsolves for which bus this occurs at
+    print("Largest Q mismatch: " + str(maxQmismatch) +" pu at bus: "+str(PQbuses[i])) #prints the values
+    print('')
+
+    return
+
+# Function that finds which are PQ and PV buses
+# given a bus_types array,
+# returns which index are PVbuses (PV buses), which index are PQbuses (PQ buses), and which index are PQPV buses (PQ or PV buses)
+def bus_Types(bus_types):
+    # PQ bus if only load
+    PQbuses = [i for i in range(len(bus_types)) if bus_types[i] == "D"]
+
+    #PV bus if only gen or gen and load
+    PVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")]
+    del PVbuses[0] #removing swing bus
+
+    #PQ or PV bus only if not swing bus
+    PQPVbuses = [i for i in range(len(bus_types)) if (bus_types[i] == "D" or bus_types[i] == "G" or bus_types[i] == "GD" or bus_types[i] == "DG")]
+    del PQPVbuses[0] #removing swing bus
+
+    return(PVbuses,PQbuses,PQPVbuses)
+
+#This function determines if there is a violation in the voltage of each bus
+# inputs: V (solved bus voltage vector), N (number of buses)
+# outputs: Vviolation (a vector of yes or no's if the voltage is out of the given Vmin, Vmax range)
+def V_violation(V,N):
+    Vviolation = ["No" for i in range(N)] #initializing vector to "No" - not violating
+    for i in range(N): #for each bus
+        # if outside range, update violation to "Yes"
+        if (V[i]>Vmax or V[i]<Vmin):
+            Vviolation[i] = "Yes"
+    return Vviolation
 
 #==============================================================================
 #  Functions about solving the power flow on lines
