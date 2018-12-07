@@ -15,7 +15,7 @@ scenarioName = "1" #this is base case
 #scenarioName = "2" #this is contingency case #2
 #scenarioName = "3" #this is contingency case #3
 
-#setting base
+#setting base folder
 basefolder = os.getcwd()
 database = basefolder + "/data/"
 
@@ -40,6 +40,8 @@ Vmin = 0.95
 
 #number of decimals to round to
 nround = 2
+Vround = 3
+
 
 #==============================================================================
 # Misc functions
@@ -403,7 +405,10 @@ def NewtonRaphson(bus_types,Ybus,Pknown,Qknown,theta0,V0,Eps,N):
         [Pcomp,Qcomp,dPQ] = calc_Mismatches(G, B, V0, theta0, N, Pknown, Qknown, PQbuses, PQPVbuses)
 
     #solve explicit equations
-    [P_new, Q_new] = solveComputed(G, B, theta0, V0, N) # Note - because it's easier when coding, I'm just resolving implicit and explicit equations because I will get the same result
+    ## Note - because it's easier when coding, I'm just resolving implicit and explicit equations, then throwing away the previously known values
+    [P_new,Q_new] = solveComputed(G, B, theta0, V0, N)
+    P_new[PQPVbuses] = Pknown[PQPVbuses]
+    Q_new[PQbuses] = Qknown[PQbuses]
     return (theta0,V0,P_new,Q_new)
 
 
@@ -489,7 +494,7 @@ def calc_flows_oneline(nfrom,nto,V_complex,Z,B):
 
 # rounds all values that need rounding
 def roundAll(Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved):
-    return (numpy.round(Smagline_from2to,nround), numpy.round(Pline_from2to,nround), numpy.round(Qline_from2to,nround), numpy.round(Smagline_to2from,nround), numpy.round(Pline_to2from,nround), numpy.round(Qline_to2from,nround), numpy.round(V,nround), numpy.round(theta,nround), numpy.round(P_MW_gen_solved,nround), numpy.round(Q_MVAR_gen_solved,nround))
+    return (numpy.around(Smagline_from2to,nround), numpy.around(Pline_from2to,nround), numpy.around(Qline_from2to,nround), numpy.around(Smagline_to2from,nround), numpy.around(Pline_to2from,nround), numpy.around(Qline_to2from,nround), numpy.around(V,Vround), numpy.around(theta,nround), numpy.around(P_MW_gen_solved,nround), numpy.around(Q_MVAR_gen_solved,nround))
 
 
 #==============================================================================
