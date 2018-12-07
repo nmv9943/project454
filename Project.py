@@ -1,3 +1,8 @@
+# Nina Vincent, Alexander Le, and Zufan Mehari
+# EE 454: Power System Analysis
+# December 7, 2018
+# Power Flow Project
+
 import numpy
 from math import cos
 from math import sin
@@ -6,6 +11,74 @@ import cmath
 import os
 from numpy.linalg import inv
 import csv
+
+#==============================================================================
+#  Function that puts all functions together and solves
+#==============================================================================
+
+# This function puts all functions together and solves for all V,theta,P,Q of generators, P,Q,S of lines, etc.
+# Writes solution to csv files / prints
+def solve_all():
+    #read in data files
+    buses = busRead()
+    lines = lineRead()
+
+    N = len(buses[1]) #number of buses
+    Nl = len(lines[1]) #number of lines
+
+    #create new objects for lines
+    [node_from,node_to,line_R,line_X,line_B,line_Fmax,line_Z]=lines
+    #create new objects for buses
+    [Bus_num,P_MW_load,Q_MVAR_load,bus_type,P_MW_gen,V_set] = buses
+
+    #conversion to pu units
+    [P_gen_pu, P_load_pu,Q_load_pu] = toPU(P_MW_gen,P_MW_load,Q_MVAR_load)
+
+    #initializations
+    Q_gen_pu = [0. for i in range(N)] #initialize Q generation matrix
+    theta = [0. for i in range(N)]  # initialize theta
+
+    #create Ybus matrix (note: I have to copy each because otherwise it deletes certain values within this function)
+    Ybus = admittance_matrix(node_from.copy(), node_to.copy(), line_B.copy(), line_Z.copy())
+
+    # calculate (initial) P & Q injections
+    P_inj = numpy.subtract(P_gen_pu,P_load_pu)
+    Q_inj = numpy.subtract(Q_gen_pu,Q_load_pu)
+
+    # perform Newton Raphson method to solve the power flow equations
+    [theta, V, P_pu_new, Q_pu_new] = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
+
+    # check for voltage violations
+    VViolation = V_violation(V,N)
+
+    # calculate power flows on transmission lines and violations
+    [Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,MVAviolation] = calc_LineFlow(V,theta, node_from,node_to,line_Fmax,Nl,line_Z,line_B)
+
+    #converting to degrees instead of radians
+    theta = rad2deg(theta)
+
+    # multiply by MVAbase so not pu anymore
+    P_MW = numpy.multiply(P_pu_new,MVAbase)
+    Q_MVAR = numpy.multiply(Q_pu_new,MVAbase)
+
+    #solving for generator P & Q:
+    P_MW_gen_solved = numpy.add(P_MW,P_MW_load)
+    Q_MVAR_gen_solved = numpy.add(Q_MVAR,Q_MVAR_load)
+
+    #rounds these values
+    [Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved]=roundAll(Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved)
+
+    # Writing results to the output window
+    busPrint(Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation)
+    linePrint(node_from,node_to,Smagline_from2to,MVAviolation)
+    
+    # Writing results to two output files in the data folder
+    busWrite([Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation])
+    lineWrite([node_from,node_to,Pline_from2to,Qline_from2to,Smagline_from2to,Pline_to2from,Qline_to2from,Smagline_to2from,MVAviolation])
+    return
+
+# actually running everything
+solve_all()
 
 #==============================================================================
 # Input File
@@ -559,70 +632,4 @@ def busWrite(listOfArrays):
         writer.writerows(toPrint)
     return
 
-#==============================================================================
-#  Functions that puts all functions together and solves
-#==============================================================================
 
-# This function puts all functions together and solves for all V,theta,P,Q of generators, P,Q,S of lines, etc.
-# Writes solution to csv files / prints
-def solve_all():
-    #read in data files
-    buses = busRead()
-    lines = lineRead()
-
-    N = len(buses[1]) #number of buses
-    Nl = len(lines[1]) #number of lines
-
-    #create new objects for lines
-    [node_from,node_to,line_R,line_X,line_B,line_Fmax,line_Z]=lines
-    #create new objects for buses
-    [Bus_num,P_MW_load,Q_MVAR_load,bus_type,P_MW_gen,V_set] = buses
-
-    #conversion to pu units
-    [P_gen_pu, P_load_pu,Q_load_pu] = toPU(P_MW_gen,P_MW_load,Q_MVAR_load)
-
-    #initializations
-    Q_gen_pu = [0. for i in range(N)] #initialize Q generation matrix
-    theta = [0. for i in range(N)]  # initialize theta
-
-    #create Ybus matrix (note: I have to copy each because otherwise it deletes certain values within this function)
-    Ybus = admittance_matrix(node_from.copy(), node_to.copy(), line_B.copy(), line_Z.copy())
-
-    # calculate (initial) P & Q injections
-    P_inj = numpy.subtract(P_gen_pu,P_load_pu)
-    Q_inj = numpy.subtract(Q_gen_pu,Q_load_pu)
-
-    # perform Newton Raphson method to solve the power flow equations
-    [theta, V, P_pu_new, Q_pu_new] = NewtonRaphson(bus_type, Ybus, P_inj, Q_inj, theta, V_set, Eps,N)
-
-    # check for voltage violations
-    VViolation = V_violation(V,N)
-
-    # calculate power flows on transmission lines and violations
-    [Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,MVAviolation] = calc_LineFlow(V,theta, node_from,node_to,line_Fmax,Nl,line_Z,line_B)
-
-    #converting to degrees instead of radians
-    theta = rad2deg(theta)
-
-    # multiply by MVAbase so not pu anymore
-    P_MW = numpy.multiply(P_pu_new,MVAbase)
-    Q_MVAR = numpy.multiply(Q_pu_new,MVAbase)
-
-    #solving for generator P & Q:
-    P_MW_gen_solved = numpy.add(P_MW,P_MW_load)
-    Q_MVAR_gen_solved = numpy.add(Q_MVAR,Q_MVAR_load)
-
-    #rounds these values
-    [Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved]=roundAll(Smagline_from2to,Pline_from2to,Qline_from2to,Smagline_to2from,Pline_to2from,Qline_to2from,V,theta,P_MW_gen_solved,Q_MVAR_gen_solved)
-
-    # Writing results to the output window
-    busPrint(Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation)
-    linePrint(node_from,node_to,Smagline_from2to,MVAviolation)
-    
-    # Writing results to two output files in the data folder
-    busWrite([Bus_num,bus_type,theta,P_MW_gen_solved,Q_MVAR_gen_solved,V,VViolation])
-    lineWrite([node_from,node_to,Pline_from2to,Qline_from2to,Smagline_from2to,Pline_to2from,Qline_to2from,Smagline_to2from,MVAviolation])
-    return
-
-# actually running everything
-solve_all()
